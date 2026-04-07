@@ -22,7 +22,7 @@ from telegram.ext import (
 
 # ============ CONFIG ============
 TELEGRAM_TOKEN = "8760392511:AAEXiLXWXcy9ZTjs2wNSp6wDo_9RJYy4VDI"
-ANTHROPIC_KEY = "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"
+ANTHROPIC_KEY = __import__('os').environ.get("ANTHROPIC_KEY", "")
 SUPABASE_URL = "https://ephveuabosmvrwbnqpdn.supabase.co"
 SUPABASE_KEY = "sb_publishable_YS2C4C5s4VyYKNmN-AMwaQ_Q_E6Ox0P"
 STRIPE_PAYMENT_LINK = "https://buy.stripe.com/28EaEWdyq2dVemNecS1sQ00"
