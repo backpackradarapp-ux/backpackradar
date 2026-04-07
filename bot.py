@@ -585,7 +585,7 @@ async def cmd_deactivate(update, context):
     update_user(target_id, {"plan": "free"})
     for city_key in CITIES:
         try:
-            await context.bot.ban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
+                        await context.bot.ban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id, until_date=int(datetime.utcnow().timestamp()) + 60)
         except Exception:
             pass
     try:
