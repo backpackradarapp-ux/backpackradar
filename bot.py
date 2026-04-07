@@ -433,7 +433,7 @@ async def cmd_start(update, context):
         msg += "\n/city - Changer de ville\n"
         msg += "/premium - Passer Pro\n"
             msg += "/status - Voir ton compte\n\n"
-    msg += "Questions ? @Backpackradarapp"
+        msg += "Questions ? @Backpackradarapp"
         await update.message.reply_text(msg, parse_mode="Markdown")
         return
     keyboard = []
