@@ -556,6 +556,7 @@ async def cmd_activate(update, context):
         try:
             invite = await context.bot.create_chat_invite_link(chat_id=CITIES[city_key]["pro"], member_limit=1)
             invite_links.append(CITIES[city_key]["name"] + " : " + invite.invite_link)
+            save_invite_link(target_id, city_key, invite.invite_link)
         except Exception as e:
             log.warning("Invite error " + city_key + ": " + str(e))
     if invite_links:
@@ -583,17 +584,27 @@ async def cmd_deactivate(update, context):
         await update.message.reply_text("User pas trouve.")
         return
     update_user(target_id, {"plan": "free"})
-    for city_key in CITIES:
-        try:
-                        await context.bot.ban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id, until_date=int(datetime.utcnow().timestamp()) + 60)
-        except Exception:
-            pass
+    old_links = get_invite_links(target_id)
+    for link_data in old_links:
+        city_key = link_data.get("city", "")
+        invite_link = link_data.get("invite_link", "")
+        if city_key in CITIES:
+            try:
+                await context.bot.ban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
+                await asyncio.sleep(1)
+                await context.bot.unban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
+            except Exception:
+                pass
+            try:
+                await context.bot.revoke_chat_invite_link(chat_id=CITIES[city_key]["pro"], invite_link=invite_link)
+            except Exception:
+                pass
+    delete_invite_links(target_id)
     try:
         await context.bot.send_message(target_id, "Ton abonnement Pro a expire. /premium pour te re-abonner.")
     except Exception:
         pass
     await update.message.reply_text(str(target_id) + " desactive.")
-
 
 async def cmd_stats(update, context):
     if update.effective_user.id not in ADMIN_IDS:
