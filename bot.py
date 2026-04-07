@@ -27,8 +27,8 @@ SUPABASE_URL = "https://ephveuabosmvrwbnqpdn.supabase.co"
 SUPABASE_KEY = "sb_publishable_YS2C4C5s4VyYKNmN-AMwaQ_Q_E6Ox0P"
 STRIPE_PAYMENT_LINK = "https://buy.stripe.com/28EaEWdyq2dVemNecS1sQ00"
 SCRAPER_API_KEY = "5099bc637688fdd9abf7db48c9fec7e9"
-CHECK_INTERVAL_MIN = 35
-CHECK_INTERVAL_MAX = 45
+CHECK_INTERVAL_MIN = 40
+CHECK_INTERVAL_MAX = 50
 ADMIN_IDS = [8416016131]
 
 # ============ CITIES + CHANNELS ============
@@ -97,6 +97,10 @@ REJECT_CATEGORY = [
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("backpackradar")
+
+
+def free_link(city_key):
+    return "https://t.me/" + CITIES[city_key]["free"].replace("@", "")
 
 
 # ============ SUPABASE ============
@@ -216,7 +220,6 @@ def scrape_seek(city_key):
             log.warning("ScraperAPI returned " + str(r.status_code) + " for " + city_key)
             return []
         html = r.text
-        # Method 1: Try to find JSON data in the page
         json_match = re.search(r'window\.SEEK_REDUX_DATA\s*=\s*(\{.+?\});', html, re.DOTALL)
         if json_match:
             try:
@@ -241,7 +244,6 @@ def scrape_seek(city_key):
                     return jobs[:20]
             except Exception as e:
                 log.warning("Redux parse failed: " + str(e))
-        # Method 2: Try to find job data in any JSON blob
         json_blobs = re.findall(r'\{"title":"[^"]+","id":\d+[^}]+\}', html)
         for blob in json_blobs:
             try:
@@ -264,7 +266,6 @@ def scrape_seek(city_key):
         if jobs:
             log.info(city_key + ": found " + str(len(jobs)) + " jobs via JSON blobs")
             return jobs[:20]
-        # Method 3: Regex on raw HTML for job cards
         title_matches = re.findall(r'<a[^>]*href="(/job/(\d+)[^"]*)"[^>]*>([^<]+)</a>', html)
         seen_ids = set()
         for href, job_id, title in title_matches:
@@ -409,7 +410,8 @@ def format_job_free(job, city_name, requirements):
     if requirements:
         lines.append("⚠️ " + ", ".join(requirements))
     lines.append("")
-    lines.append("_Lien reserve aux membres Pro -> @backpackradar\\_bot /premium_")
+    lines.append("Lien reserve aux membres Pro")
+    lines.append("👉 @backpackradar\\_bot puis /premium")
     return "\n".join(lines)
 
 
@@ -427,13 +429,13 @@ async def cmd_start(update, context):
         msg += "Ta ville : *" + city_name + "*\n"
         msg += "Ton plan : *" + plan.upper() + "*\n\n"
         if city_key in CITIES:
-            msg += "📢 Canal FREE : " + CITIES[city_key]["free"] + "\n"
+            msg += "📢 Canal FREE : " + free_link(city_key) + "\n"
             if plan == "premium":
-                msg += "⭐ Canal PRO : " + CITIES[city_key]["pro"] + "\n"
+                msg += "⭐ Canaux PRO : acces via tes liens d invitation\n"
         msg += "\n/city - Changer de ville\n"
         msg += "/premium - Passer Pro\n"
         msg += "/status - Voir ton compte\n\n"
-        msg += "Questions ? @Backpackradarapp"
+        msg += "Questions ? @quentin51270"
         await update.message.reply_text(msg, parse_mode="Markdown")
         return
     keyboard = []
@@ -494,10 +496,10 @@ async def cmd_status(update, context):
     msg = "📋 *Ton compte*\n\n"
     msg += "📍 Ville : *" + city_name + "*\n"
     msg += "💎 Plan : *" + plan + "*\n"
-            if city_key in CITIES:
-                    msg += "📢 Canal FREE : https://t.me/" + CITIES[city_key]["free"].replace("@", "") + "\n"
+    if city_key in CITIES:
+        msg += "📢 Canal FREE : " + free_link(city_key) + "\n"
         if user_data.get("plan") == "premium":
-            msg += "⭐ Canal PRO : acces via /premium\n"
+            msg += "⭐ Canaux PRO : acces via tes liens d invitation\n"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
@@ -506,8 +508,8 @@ async def cmd_help(update, context):
     msg += "/start - Accueil\n"
     msg += "/city - Changer de ville\n"
     msg += "/premium - Passer Pro\n"
-        msg += "/status - Ton compte\n\n"
-    msg += "Questions ? @Backpackradarapp"
+    msg += "/status - Ton compte\n\n"
+    msg += "Questions ? @quentin51270"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
@@ -526,12 +528,12 @@ async def callback_handler(update, context):
             update_user(user.id, {"city": city_key})
         else:
             create_user(user.id, user.username or str(user.id), city_key, "free")
-                city = CITIES[city_key]
+        city = CITIES[city_key]
         msg = "✅ Parfait !\n\n"
         msg += "Tu recevras les offres WHV pour *" + city["name"] + "*.\n\n"
         msg += "⭐ Pour les liens directs : /premium"
-        free_link = "https://t.me/" + city["free"].replace("@", "")
-        keyboard = [[InlineKeyboardButton("👉 Rejoins le canal " + city["name"], url=free_link)]]
+        fl = "https://t.me/" + city["free"].replace("@", "")
+        keyboard = [[InlineKeyboardButton("👉 Rejoins le canal " + city["name"], url=fl)]]
         await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
@@ -581,8 +583,7 @@ async def cmd_deactivate(update, context):
         await update.message.reply_text("User pas trouve.")
         return
     update_user(target_id, {"plan": "free"})
-    city_key = user_data.get("city", "")
-    if city_key in CITIES:
+    for city_key in CITIES:
         try:
             await context.bot.ban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
         except Exception:
@@ -684,7 +685,7 @@ async def post_init(app):
 
 def main():
     log.info("============================================")
-    log.info("   BACKPACKRADAR FINAL - Channels + Stripe")
+    log.info("   BACKPACKRADAR FINAL")
     log.info("============================================")
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", cmd_start))
