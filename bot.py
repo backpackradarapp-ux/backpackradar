@@ -7,7 +7,7 @@ import random
 import re
 from datetime import datetime, timedelta
 
-import anthropic
+# anthropic removed - using requests directly
 import requests
 from bs4 import BeautifulSoup
 from telegram import (
@@ -76,7 +76,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("backpackradar")
 
-ai_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+# using requests for anthropic API
 
 
 def supabase_headers():
@@ -324,7 +324,7 @@ def quick_reject(job):
     return False
 
 
-def analyze_with_ai(job):
+def def analyze_with_ai(job):
     prompt_text = "I post jobs for backpackers on Working Holiday Visas in Australia. Should I post this one?\n\n"
     prompt_text += "A backpacker typically has:\n"
     prompt_text += "- No Australian qualifications\n"
@@ -343,7 +343,7 @@ def analyze_with_ai(job):
     prompt_text += "- Childcare assistant, pet care, sports coach\n\n"
     prompt_text += "Say NO if:\n"
     prompt_text += "- Title contains Senior + a professional field\n"
-    prompt_text += "- Requires Australian certification (Cert IV, diploma, degree, registration)\n"
+    prompt_text += "- Requires Australian certification\n"
     prompt_text += "- Banking, finance professional, insurance underwriter\n"
     prompt_text += "- IT/Software professional role\n"
     prompt_text += "- Government role requiring citizenship\n"
@@ -352,14 +352,23 @@ def analyze_with_ai(job):
     prompt_text += "Category: " + job.get("subClass", "") + "\n"
     prompt_text += "Full text preview: " + job.get("fullText", "")[:200] + "\n\n"
     prompt_text += "One word YES or NO:"
-
     try:
-        response = ai_client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=30,
-            messages=[{"role": "user", "content": prompt_text}],
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 30,
+                "messages": [{"role": "user", "content": prompt_text}],
+            },
+            timeout=15,
         )
-        result = response.content[0].text.strip().upper()
+        data = r.json()
+        result = data["content"][0]["text"].strip().upper()
         return "YES" in result
     except Exception as e:
         log.warning("AI error: " + str(e))
