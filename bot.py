@@ -202,6 +202,40 @@ def save_job(job, city, requirements):
         return r.status_code in [200, 201]
     except Exception:
         return False
+        
+def save_invite_link(telegram_id, city, invite_link):
+    url = SUPABASE_URL + "/rest/v1/invite_links"
+    headers = supabase_headers()
+    headers["Prefer"] = "return=minimal"
+    data = {
+        "telegram_id": telegram_id,
+        "city": city,
+        "invite_link": invite_link,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    try:
+        requests.post(url, headers=headers, json=data)
+    except Exception:
+        pass
+
+
+def get_invite_links(telegram_id):
+    url = SUPABASE_URL + "/rest/v1/invite_links?telegram_id=eq." + str(telegram_id) + "&select=*"
+    try:
+        r = requests.get(url, headers=supabase_headers())
+        return r.json()
+    except Exception:
+        return []
+
+
+def delete_invite_links(telegram_id):
+    url = SUPABASE_URL + "/rest/v1/invite_links?telegram_id=eq." + str(telegram_id)
+    headers = supabase_headers()
+    try:
+        requests.delete(url, headers=headers)
+    except Exception:
+        pass
+
 
 
 # ============ SEEK SCRAPING VIA SCRAPERAPI ============
