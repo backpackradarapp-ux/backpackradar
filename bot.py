@@ -432,7 +432,8 @@ async def cmd_start(update, context):
                 msg += "⭐ Canal PRO : " + CITIES[city_key]["pro"] + "\n"
         msg += "\n/city - Changer de ville\n"
         msg += "/premium - Passer Pro\n"
-        msg += "/status - Voir ton compte"
+            msg += "/status - Voir ton compte\n\n"
+    msg += "Questions ? @Backpackradarapp"
         await update.message.reply_text(msg, parse_mode="Markdown")
         return
     keyboard = []
@@ -505,7 +506,8 @@ async def cmd_help(update, context):
     msg += "/start - Accueil\n"
     msg += "/city - Changer de ville\n"
     msg += "/premium - Passer Pro\n"
-    msg += "/status - Ton compte"
+        msg += "/status - Ton compte\n\n"
+    msg += "Questions ? @Backpackradarapp"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
