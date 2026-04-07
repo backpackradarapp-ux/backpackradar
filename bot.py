@@ -1,3 +1,10 @@
+"""
+BACKPACKRADAR — Telegram Bot + Scraper
+Tourne 24/7 sur Railway/Render
+Scrape Seek sans Playwright (requests + BS4)
+Système freemium : 1 offre/jour gratuit, illimité payant
+"""
+
 import asyncio
 import hashlib
 import json
