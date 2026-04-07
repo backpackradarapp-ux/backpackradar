@@ -27,8 +27,8 @@ SUPABASE_URL = "https://ephveuabosmvrwbnqpdn.supabase.co"
 SUPABASE_KEY = "sb_publishable_YS2C4C5s4VyYKNmN-AMwaQ_Q_E6Ox0P"
 STRIPE_PAYMENT_LINK = "https://buy.stripe.com/28EaEWdyq2dVemNecS1sQ00"
 SCRAPER_API_KEY = "5099bc637688fdd9abf7db48c9fec7e9"
-CHECK_INTERVAL_MIN = 12
-CHECK_INTERVAL_MAX = 18
+CHECK_INTERVAL_MIN = 35
+CHECK_INTERVAL_MAX = 45
 ADMIN_IDS = [8416016131]
 
 # ============ CITIES + CHANNELS ============
@@ -546,17 +546,23 @@ async def cmd_activate(update, context):
         await update.message.reply_text("User pas trouve.")
         return
     update_user(target_id, {"plan": "premium"})
-    city_key = user_data.get("city", "")
-    if city_key in CITIES:
+    invite_links = []
+    for city_key in CITIES:
         try:
             invite = await context.bot.create_chat_invite_link(chat_id=CITIES[city_key]["pro"], member_limit=1)
-            msg = "🎉 *Ton compte est maintenant Pro !*\n\n"
-            msg += "👉 Rejoins ton canal Pro : " + invite.invite_link + "\n\n"
-            msg += "Merci ! 🙏"
-            await context.bot.send_message(target_id, msg, parse_mode="Markdown")
+            invite_links.append(CITIES[city_key]["name"] + " : " + invite.invite_link)
         except Exception as e:
-            log.warning("Invite error: " + str(e))
-            await context.bot.send_message(target_id, "🎉 Ton compte est Pro ! Contacte l admin pour le lien du canal.")
+            log.warning("Invite error " + city_key + ": " + str(e))
+    if invite_links:
+        msg = "🎉 *Ton compte est maintenant Pro !*\n\n"
+        msg += "👉 Rejoins tes canaux Pro :\n\n"
+        for link in invite_links:
+            msg += link + "\n"
+        msg += "\nMerci ! 🙏"
+        try:
+            await context.bot.send_message(target_id, msg, parse_mode="Markdown")
+        except Exception:
+            pass
     await update.message.reply_text("✅ " + str(target_id) + " active en Pro.")
 
 
