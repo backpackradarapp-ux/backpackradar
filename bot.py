@@ -208,21 +208,38 @@ SEEK_HEADERS = {
 }
 
 
-def build_seek_api_url(city_key, page=1):
-    c = CITIES[city_key]
-    return "https://www.seek.com.au/api/chalice-search/v4/search?where=" + c["name"] + "+" + c["state"] + "+" + c["postcode"] + "&daterange=1&sortmode=ListedDate&distance=20&page=" + str(page) + "&pagesize=20"
-
-
 def scrape_seek_api(city_key):
     jobs = []
+    c = CITIES[city_key]
+    city_slug = c["name"].replace(" ", "-")
+    seek_url = "https://www.seek.com.au/jobs/in-" + city_slug + "-" + c["state"] + "-" + c["postcode"] + "?daterange=1&sortmode=ListedDate&distance=20"
+    proxy_url = "http://api.scraperapi.com?api_key=5099bc637688fdd9abf7db48c9fec7e9&url=" + seek_url + "&render=true"
     try:
-        seek_url = build_seek_api_url(city_key)
-        proxy_url = "http://api.scraperapi.com?api_key=5099bc637688fdd9abf7db48c9fec7e9&url=" + seek_url
-        r = requests.get(proxy_url, timeout=30)
+        r = requests.get(proxy_url, timeout=60)
         log.info("Seek response for " + city_key + ": " + str(r.status_code))
-        if r.status_code == 200:
-            data = r.json()
-            for item in data.get("data", []):
+        if r.status_code != 200:
+            return []
+        text = r.text
+        pattern = r'"title":"([^"]+)".*?"advertiser":\{"description":"([^"]*)".*?"id":(\d+).*?"teaser":"([^"]*)"'
+        matches = re.findall(pattern, text)
+        for m in matches:
+            job = {
+                "title": m[0],
+                "company": m[1],
+                "location": "",
+                "subClass": "",
+                "classification": "",
+                "contractType": "",
+                "salary": "",
+                "link": "https://www.seek.com.au/job/" + m[2],
+                "fullText": m[3],
+            }
+            if job["title"]:
+                jobs.append(job)
+        log.info(city_key + " parsed " + str(len(jobs)) + " jobs from HTML")
+    except Exception as e:
+        log.warning("Seek failed for " + city_key + ": " + str(e))
+    return jobs[:20]
                 job = {
                     "title": item.get("title", ""),
                     "company": item.get("advertiser", {}).get("description", ""),
