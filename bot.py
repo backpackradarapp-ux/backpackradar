@@ -37,35 +37,35 @@ CITIES = {
         "name": "Adelaide",
         "state": "SA",
         "postcode": "5000",
-        "free": "@bpr\_adelaide\_free",
+        "free": "@bpr_adelaide_free",
         "pro": "@bpr_adelaide_pro",
     },
     "perth": {
         "name": "Perth",
         "state": "WA",
         "postcode": "6000",
-        "free": "@bpr\_perth\_free",
+        "free": "@bpr_perth_free",
         "pro": "@bpr_perth_pro",
     },
     "brisbane": {
         "name": "Brisbane",
         "state": "QLD",
         "postcode": "4000",
-        "free": "@bpr\_brisbane\_free",
+        "free": "@bpr_brisbane_free",
         "pro": "@bpr_brisbane_pro",
     },
     "sydney": {
         "name": "Sydney",
         "state": "NSW",
         "postcode": "2000",
-        "free": "@bpr\_sydney\_free",
+        "free": "@bpr_sydney_free",
         "pro": "@bpr_sydney_pro",
     },
     "melbourne": {
         "name": "Melbourne",
         "state": "VIC",
         "postcode": "3000",
-        "free": "@bpr\_melbourne\_free",
+        "free": "@bpr_melbourne_free",
         "pro": "@bpr_melbourne_pro",
     },
 }
@@ -494,10 +494,10 @@ async def cmd_status(update, context):
     msg = "📋 *Ton compte*\n\n"
     msg += "📍 Ville : *" + city_name + "*\n"
     msg += "💎 Plan : *" + plan + "*\n"
-    if city_key in CITIES:
-        msg += "📢 Canal FREE : " + CITIES[city_key]["free"] + "\n"
+            if city_key in CITIES:
+                    msg += "📢 Canal FREE : https://t.me/" + CITIES[city_key]["free"].replace("@", "") + "\n"
         if user_data.get("plan") == "premium":
-            msg += "⭐ Canal PRO : " + CITIES[city_key]["pro"] + "\n"
+            msg += "⭐ Canal PRO : acces via /premium\n"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
@@ -526,12 +526,13 @@ async def callback_handler(update, context):
             update_user(user.id, {"city": city_key})
         else:
             create_user(user.id, user.username or str(user.id), city_key, "free")
-        city = CITIES[city_key]
+                city = CITIES[city_key]
         msg = "✅ Parfait !\n\n"
-        msg += "👉 Rejoins ton canal FREE : " + city["free"] + "\n\n"
-        msg += "Tu y recevras les offres WHV pour *" + city["name"] + "*.\n\n"
+        msg += "Tu recevras les offres WHV pour *" + city["name"] + "*.\n\n"
         msg += "⭐ Pour les liens directs : /premium"
-        await query.edit_message_text(msg, parse_mode="Markdown")
+        free_link = "https://t.me/" + city["free"].replace("@", "")
+        keyboard = [[InlineKeyboardButton("👉 Rejoins le canal " + city["name"], url=free_link)]]
+        await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 # ============ ADMIN COMMANDS ============
