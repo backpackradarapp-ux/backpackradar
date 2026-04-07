@@ -216,8 +216,9 @@ def build_seek_api_url(city_key, page=1):
 def scrape_seek_api(city_key):
     jobs = []
     try:
-        url = build_seek_api_url(city_key)
-        r = requests.get(url, headers=SEEK_HEADERS, timeout=15)
+        seek_url = build_seek_api_url(city_key)
+        proxy_url = "http://api.scraperapi.com?api_key=5099bc637688fdd9abf7db48c9fec7e9&url=" + seek_url
+        r = requests.get(proxy_url, timeout=30)
         log.info("Seek response for " + city_key + ": " + str(r.status_code))
         if r.status_code == 200:
             data = r.json()
