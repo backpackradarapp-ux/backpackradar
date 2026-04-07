@@ -2,12 +2,10 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import random
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# anthropic removed - using requests directly
 import requests
 from bs4 import BeautifulSoup
 from telegram import (
@@ -27,7 +25,6 @@ TELEGRAM_TOKEN = "8760392511:AAEXiLXWXcy9ZTjs2wNSp6wDo_9RJYy4VDI"
 ANTHROPIC_KEY = "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"
 SUPABASE_URL = "https://ephveuabosmvrwbnqpdn.supabase.co"
 SUPABASE_KEY = "sb_publishable_YS2C4C5s4VyYKNmN-AMwaQ_Q_E6Ox0P"
-MAIN_CHANNEL_ID = ""
 CHECK_INTERVAL_MIN = 12
 CHECK_INTERVAL_MAX = 18
 ADMIN_IDS = [8416016131]
@@ -70,13 +67,8 @@ REJECT_CATEGORY = [
     "teaching - tertiary", "teaching - primary",
 ]
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("backpackradar")
-
-# using requests for anthropic API
 
 
 def supabase_headers():
@@ -203,12 +195,6 @@ SEEK_HEADERS = {
 }
 
 
-def build_seek_url(city_key):
-    c = CITIES[city_key]
-    city_slug = c["name"].replace(" ", "-")
-    return "https://www.seek.com.au/jobs/in-" + city_slug + "-" + c["state"] + "-" + c["postcode"] + "?daterange=1&sortmode=ListedDate&distance=20"
-
-
 def build_seek_api_url(city_key, page=1):
     c = CITIES[city_key]
     return "https://www.seek.com.au/api/chalice-search/v4/search?where=" + c["name"] + "+" + c["state"] + "+" + c["postcode"] + "&daterange=1&sortmode=ListedDate&distance=20&page=" + str(page) + "&pagesize=20"
@@ -235,75 +221,8 @@ def scrape_seek_api(city_key):
                 }
                 if job["title"]:
                     jobs.append(job)
-            if jobs:
-                return jobs[:20]
     except Exception as e:
-        log.warning("API Seek failed for " + city_key + ": " + str(e))
-
-    try:
-        url = build_seek_url(city_key)
-        r = requests.get(url, headers=SEEK_HEADERS, timeout=15)
-        if r.status_code != 200:
-            log.warning("Seek HTML " + str(r.status_code) + " for " + city_key)
-            return []
-
-        soup = BeautifulSoup(r.text, "html.parser")
-        scripts = soup.find_all("script")
-        for script in scripts:
-            if script.string and "window.SEEK_REDUX_DATA" in script.string:
-                match = re.search(
-                    r"window\.SEEK_REDUX_DATA\s*=\s*(\{.*?\});?\s*$",
-                    script.string,
-                    re.DOTALL,
-                )
-                if match:
-                    try:
-                        redux_data = json.loads(match.group(1))
-                        results = redux_data.get("results", {}).get("results", {}).get("jobs", [])
-                        for item in results:
-                            job = {
-                                "title": item.get("title", ""),
-                                "company": item.get("advertiser", {}).get("description", ""),
-                                "location": item.get("location", ""),
-                                "subClass": item.get("subClassification", {}).get("description", ""),
-                                "classification": item.get("classification", {}).get("description", ""),
-                                "contractType": item.get("workType", ""),
-                                "salary": item.get("salary", ""),
-                                "link": "https://www.seek.com.au/job/" + str(item.get("id", "")),
-                                "fullText": item.get("teaser", ""),
-                            }
-                            if job["title"]:
-                                jobs.append(job)
-                    except json.JSONDecodeError:
-                        pass
-
-        if not jobs:
-            cards = soup.select("article[data-testid='job-card']")
-            for card in cards:
-                title_link = card.select_one("a[href*='/job/']")
-                if not title_link:
-                    continue
-                title = title_link.get_text(strip=True)
-                link = "https://www.seek.com.au" + title_link["href"].split("?")[0]
-                company_link = card.select_one("a[href*='-jobs']")
-                company = company_link.get_text(strip=True) if company_link else ""
-                full_text = card.get_text(" ", strip=True)[:500]
-                job = {
-                    "title": title,
-                    "company": company,
-                    "location": "",
-                    "subClass": "",
-                    "classification": "",
-                    "contractType": "",
-                    "salary": "",
-                    "link": link,
-                    "fullText": full_text,
-                }
-                jobs.append(job)
-
-    except Exception as e:
-        log.error("Scraping HTML failed for " + city_key + ": " + str(e))
-
+        log.warning("Seek API failed for " + city_key + ": " + str(e))
     return jobs[:20]
 
 
@@ -324,7 +243,7 @@ def quick_reject(job):
     return False
 
 
-def def analyze_with_ai(job):
+def analyze_with_ai(job):
     prompt_text = "I post jobs for backpackers on Working Holiday Visas in Australia. Should I post this one?\n\n"
     prompt_text += "A backpacker typically has:\n"
     prompt_text += "- No Australian qualifications\n"
@@ -390,15 +309,8 @@ def detect_requirements(title, full_text):
 
 
 def format_job_message(job, city_name, requirements):
-    type_emoji = {
-        "Full-time": "🟢",
-        "Part-time": "🔵",
-        "Casual": "🟡",
-        "Contract": "🟠",
-    }
     ct = job.get("contractType", "")
-    emoji = type_emoji.get(ct, "💼")
-
+    emoji = {"Full-time": "🟢", "Part-time": "🔵", "Casual": "🟡", "Contract": "🟠"}.get(ct, "💼")
     lines = []
     lines.append(emoji + " *" + job["title"] + "*")
     lines.append("🏢 " + job.get("company", "N/A"))
@@ -411,35 +323,30 @@ def format_job_message(job, city_name, requirements):
         lines.append("⚠️ " + ", ".join(requirements))
     lines.append("")
     lines.append("🔗 [Postuler ici](" + job["link"] + ")")
-
     return "\n".join(lines)
 
 
 def format_job_teaser(job, city_name):
     msg = "💼 *" + job["title"] + "*\n"
     msg += "🏢 " + job.get("company", "N/A") + " - " + city_name + "\n\n"
-    msg += "_⭐ Passe en Pro pour voir toutes les offres, tous les liens, toutes les villes -> /premium_"
+    msg += "_⭐ Passe en Pro pour voir toutes les offres -> /premium_"
     return msg
 
 
 async def cmd_start(update, context):
     user = update.effective_user
     existing = get_user(user.id)
-
     if existing:
         city_info = CITIES.get(existing.get("city", ""), {})
         city_name = city_info.get("name", "Non definie")
         msg = "Content de te revoir ! 👋\n\n"
         msg += "Ta ville : *" + city_name + "*\n"
         msg += "Ton plan : *" + existing.get("plan", "free").upper() + "*\n\n"
-        msg += "Commandes :\n"
         msg += "/city - Changer de ville\n"
         msg += "/premium - Passer Pro\n"
-        msg += "/status - Voir ton compte\n"
-        msg += "/help - Aide"
+        msg += "/status - Voir ton compte"
         await update.message.reply_text(msg, parse_mode="Markdown")
         return
-
     keyboard = []
     row = []
     for key, city in CITIES.items():
@@ -449,17 +356,12 @@ async def cmd_start(update, context):
             row = []
     if row:
         keyboard.append(row)
-
     msg = "🎒 *Bienvenue sur BackpackRadar !*\n\n"
     msg += "Je trouve les meilleurs jobs WHV/PVT en Australie pour toi.\n\n"
     msg += "🆓 *Plan Gratuit* : 3 offres/jour pour 1 ville\n"
-    msg += "⭐ *Plan Pro* : Toutes les offres + toutes les villes + liens directs ($9.99/mois)\n\n"
-    msg += "Pour commencer, choisis ta ville :"
-    await update.message.reply_text(
-        msg,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    msg += "⭐ *Plan Pro* : Toutes les offres + toutes les villes ($9.99/mois)\n\n"
+    msg += "Choisis ta ville :"
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def cmd_city(update, context):
@@ -472,108 +374,80 @@ async def cmd_city(update, context):
             row = []
     if row:
         keyboard.append(row)
-
-    await update.message.reply_text(
-        "📍 Choisis ta ville :",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    await update.message.reply_text("📍 Choisis ta ville :", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def cmd_premium(update, context):
     msg = "⭐ *BackpackRadar Pro*\n\n"
     msg += "✅ Toutes les offres WHV en temps reel\n"
-    msg += "✅ Lien direct pour postuler en 1 clic\n"
-    msg += "✅ Alertes illimitees\n"
-    msg += "✅ Acces a TOUTES les villes d Australie\n\n"
-    msg += "💰 *$9.99 AUD/mois*\n"
-    msg += "_(moins cher qu un cafe par semaine)_\n\n"
-    msg += "Pour t abonner, contacte @backpackradar\\_support\n\n"
-    msg += "_Apres paiement, ton compte est active en quelques minutes._"
+    msg += "✅ Lien direct pour postuler\n"
+    msg += "✅ Toutes les villes d Australie\n\n"
+    msg += "💰 *$9.99 AUD/mois*\n\n"
+    msg += "Contacte @backpackradar\\_support pour t abonner"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def cmd_status(update, context):
     user_data = get_user(update.effective_user.id)
     if not user_data:
-        await update.message.reply_text("Tu n es pas encore inscrit. Tape /start !")
+        await update.message.reply_text("Tape /start pour commencer !")
         return
-
     city_info = CITIES.get(user_data.get("city", ""), {})
     city_name = city_info.get("name", "Non definie")
     plan = user_data.get("plan", "free").upper()
     sent = user_data.get("jobs_sent_today", 0)
-
-    msg = "📋 *Ton compte BackpackRadar*\n\n"
+    msg = "📋 *Ton compte*\n\n"
     msg += "📍 Ville : *" + city_name + "*\n"
     msg += "💎 Plan : *" + plan + "*\n"
-
     if user_data.get("plan", "free") == "free":
         remaining = max(0, 3 - sent)
-        msg += "📊 Offres restantes aujourd hui : *" + str(remaining) + "/3*\n"
+        msg += "📊 Offres restantes : *" + str(remaining) + "/3*"
     else:
-        msg += "📊 Offres : *Illimitees* ✨\n"
-
-    msg += "\n/city - Changer de ville\n"
-    msg += "/premium - Passer Pro"
+        msg += "📊 Offres : *Illimitees* ✨"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def cmd_help(update, context):
-    msg = "🎒 *BackpackRadar - Aide*\n\n"
-    msg += "/start - S inscrire / Accueil\n"
+    msg = "🎒 *BackpackRadar*\n\n"
+    msg += "/start - Accueil\n"
     msg += "/city - Changer de ville\n"
     msg += "/premium - Infos Pro\n"
-    msg += "/status - Voir ton compte\n\n"
-    msg += "Le bot scan Seek toutes les ~15 min et t envoie "
-    msg += "les offres adaptees aux WHV/PVT.\n\n"
-    msg += "Questions ? Contacte @backpackradar\\_support"
+    msg += "/status - Ton compte"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def callback_handler(update, context):
     query = update.callback_query
     await query.answer()
-
     data = query.data
     user = query.from_user
-
     if data.startswith("city_"):
         city_key = data.replace("city_", "")
         if city_key not in CITIES:
             await query.edit_message_text("Ville non reconnue.")
             return
-
         existing = get_user(user.id)
         if existing:
             update_user(user.id, {"city": city_key})
         else:
             create_user(user.id, user.username or str(user.id), city_key, "free")
-
         city_name = CITIES[city_key]["name"]
-        msg = "✅ Parfait ! Tu recevras les offres WHV pour *" + city_name + "*.\n\n"
-        msg += "🆓 Plan Gratuit : 3 offres/jour pour cette ville\n"
-        msg += "⭐ /premium pour toutes les offres + toutes les villes !"
+        msg = "✅ Tu recevras les offres WHV pour *" + city_name + "*.\n\n"
+        msg += "⭐ /premium pour toutes les villes !"
         await query.edit_message_text(msg, parse_mode="Markdown")
 
 
 async def cmd_activate(update, context):
     if update.effective_user.id not in ADMIN_IDS:
         return
-
     if not context.args:
         await update.message.reply_text("Usage: /activate <telegram_id>")
         return
-
     target_id = int(context.args[0])
     update_user(target_id, {"plan": "premium"})
-    await update.message.reply_text("✅ User " + str(target_id) + " passe en Premium.")
-
+    await update.message.reply_text("✅ User " + str(target_id) + " active en Pro.")
     try:
-        bot = context.bot
-        msg = "🎉 *Ton compte est maintenant Pro !*\n\n"
-        msg += "Tu recevras toutes les offres WHV avec liens directs.\n"
-        msg += "Merci pour ton soutien ! 🙏"
-        await bot.send_message(target_id, msg, parse_mode="Markdown")
+        await context.bot.send_message(target_id, "🎉 *Ton compte est Pro !*\nMerci ! 🙏", parse_mode="Markdown")
     except Exception:
         pass
 
@@ -581,23 +455,16 @@ async def cmd_activate(update, context):
 async def cmd_stats(update, context):
     if update.effective_user.id not in ADMIN_IDS:
         return
-
     try:
         url = SUPABASE_URL + "/rest/v1/users?select=plan"
         r = requests.get(url, headers=supabase_headers())
         users = r.json()
         total = len(users)
-        premium = 0
-        for u in users:
-            if u.get("plan") == "premium":
-                premium += 1
-        free = total - premium
-
-        msg = "📊 *Stats BackpackRadar*\n\n"
-        msg += "👥 Total users : " + str(total) + "\n"
-        msg += "🆓 Free : " + str(free) + "\n"
+        premium = sum(1 for u in users if u.get("plan") == "premium")
+        msg = "📊 *Stats*\n\n"
+        msg += "👥 Total : " + str(total) + "\n"
         msg += "⭐ Premium : " + str(premium) + "\n"
-        msg += "💰 Revenue estime : $" + str(int(premium * 9.99)) + "/mois"
+        msg += "💰 ~$" + str(int(premium * 9.99)) + "/mois"
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text("Erreur: " + str(e))
@@ -606,34 +473,26 @@ async def cmd_stats(update, context):
 async def send_job_to_users(bot, job, city_key, requirements):
     city_name = CITIES[city_key]["name"]
     already_sent = set()
-
-    premium_users = get_premium_users()
-    for user_data in premium_users:
+    for user_data in get_premium_users():
         try:
             tid = user_data["telegram_id"]
             already_sent.add(tid)
-            msg = format_job_message(job, city_name, requirements)
-            await bot.send_message(tid, msg, parse_mode="Markdown")
-        except Exception as e:
-            log.warning("Error sending premium to " + str(user_data.get("telegram_id")) + ": " + str(e))
-
-    free_users = get_users_by_city(city_key)
-    for user_data in free_users:
+            await bot.send_message(tid, format_job_message(job, city_name, requirements), parse_mode="Markdown")
+        except Exception:
+            pass
+    for user_data in get_users_by_city(city_key):
         try:
             tid = user_data["telegram_id"]
             if tid in already_sent:
                 continue
-            plan = user_data.get("plan", "free")
-            if plan != "free":
+            if user_data.get("plan", "free") != "free":
                 continue
             sent_today = user_data.get("jobs_sent_today", 0)
             if sent_today < 3:
-                msg = format_job_teaser(job, city_name)
-                await bot.send_message(tid, msg, parse_mode="Markdown")
+                await bot.send_message(tid, format_job_teaser(job, city_name), parse_mode="Markdown")
                 update_user(tid, {"jobs_sent_today": sent_today + 1})
-        except Exception as e:
-            log.warning("Error sending free to " + str(user_data.get("telegram_id")) + ": " + str(e))
-
+        except Exception:
+            pass
     await asyncio.sleep(0.5)
 
 
@@ -641,27 +500,20 @@ async def scraping_loop(app):
     bot = app.bot
     cycle = 0
     last_reset = datetime.utcnow().date()
-
     await asyncio.sleep(5)
     log.info("Scraping loop started")
-
     while True:
         cycle += 1
         now = datetime.utcnow()
-
         if now.date() > last_reset:
             reset_daily_counts()
             last_reset = now.date()
-            log.info("Daily counters reset")
-
-        log.info("=== CYCLE " + str(cycle) + " - " + now.strftime("%H:%M:%S UTC") + " ===")
-
+        log.info("=== CYCLE " + str(cycle) + " ===")
         total_new = 0
         for city_key in CITIES:
             try:
                 jobs = scrape_seek_api(city_key)
-                log.info("  " + CITIES[city_key]["name"] + ": " + str(len(jobs)) + " jobs found")
-
+                log.info(CITIES[city_key]["name"] + ": " + str(len(jobs)) + " jobs")
                 for job in jobs:
                     jh = make_hash(job, city_key)
                     if job_exists(jh):
@@ -670,33 +522,22 @@ async def scraping_loop(app):
                         continue
                     if not analyze_with_ai(job):
                         continue
-
                     requirements = detect_requirements(job["title"], job.get("fullText", ""))
                     if save_job(job, city_key, requirements):
                         total_new += 1
-                        log.info("  OK " + job["title"] + " - " + job.get("company", ""))
+                        log.info("OK " + job["title"])
                         await send_job_to_users(bot, job, city_key, requirements)
-
             except Exception as e:
-                log.error("  ERROR " + city_key + ": " + str(e))
-
+                log.error("ERROR " + city_key + ": " + str(e))
             await asyncio.sleep(random.randint(5, 15))
-
-        log.info("Cycle " + str(cycle) + " done - " + str(total_new) + " new jobs")
-
+        log.info("Cycle done - " + str(total_new) + " new")
         wait = random.randint(CHECK_INTERVAL_MIN * 60, CHECK_INTERVAL_MAX * 60)
-        log.info("Next cycle in ~" + str(wait // 60) + " min")
         await asyncio.sleep(wait)
 
 
 def main():
-    log.info("============================================")
-    log.info("   BACKPACKRADAR - Telegram Bot + Scraper")
-    log.info("   10 cities | AI Filter | Freemium")
-    log.info("============================================")
-
+    log.info("BACKPACKRADAR starting")
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("city", cmd_city))
     app.add_handler(CommandHandler("premium", cmd_premium))
@@ -704,12 +545,9 @@ def main():
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("activate", cmd_activate))
     app.add_handler(CommandHandler("stats", cmd_stats))
-
     app.add_handler(CallbackQueryHandler(callback_handler))
-
     loop = asyncio.get_event_loop()
     loop.create_task(scraping_loop(app))
-
     app.run_polling(drop_pending_updates=True)
 
 
