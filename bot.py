@@ -5,7 +5,6 @@ import logging
 import random
 import re
 from datetime import datetime
-from threading import Thread
 
 import requests
 from telegram import (
@@ -27,6 +26,7 @@ ANTHROPIC_KEY = "sk-ant-api03-coDUr9B3li8N7snjzAIxj3-DcBTxb4Estrm5J1P94dDOGxXuxI
 SUPABASE_URL = "https://ephveuabosmvrwbnqpdn.supabase.co"
 SUPABASE_KEY = "sb_publishable_YS2C4C5s4VyYKNmN-AMwaQ_Q_E6Ox0P"
 STRIPE_PAYMENT_LINK = "https://buy.stripe.com/28EaEWdyq2dVemNecS1sQ00"
+SCRAPER_API_KEY = "5099bc637688fdd9abf7db48c9fec7e9"
 CHECK_INTERVAL_MIN = 12
 CHECK_INTERVAL_MAX = 18
 ADMIN_IDS = [8416016131]
@@ -98,6 +98,7 @@ REJECT_CATEGORY = [
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("backpackradar")
 
+
 # ============ SUPABASE ============
 
 def supabase_headers():
@@ -115,9 +116,9 @@ def get_user(telegram_id):
         data = r.json()
         if data and len(data) > 0:
             return data[0]
-        return None
     except Exception:
-        return None
+        pass
+    return None
 
 
 def create_user(telegram_id, username, city="", plan="free"):
@@ -128,7 +129,6 @@ def create_user(telegram_id, username, city="", plan="free"):
         "city": city,
         "plan": plan,
         "jobs_sent_today": 0,
-        "last_job_date": datetime.utcnow().isoformat(),
         "created_at": datetime.utcnow().isoformat(),
     }
     headers = supabase_headers()
@@ -139,9 +139,9 @@ def create_user(telegram_id, username, city="", plan="free"):
             result = r.json()
             if result and len(result) > 0:
                 return result[0]
-        return None
     except Exception:
-        return None
+        pass
+    return None
 
 
 def update_user(telegram_id, updates):
@@ -168,7 +168,8 @@ def job_exists(job_hash):
     url = SUPABASE_URL + "/rest/v1/jobs?job_hash=eq." + job_hash + "&select=id"
     try:
         r = requests.get(url, headers=supabase_headers())
-        return len(r.json()) > 0
+        data = r.json()
+        return len(data) > 0
     except Exception:
         return False
 
@@ -199,62 +200,94 @@ def save_job(job, city, requirements):
         return False
 
 
-# ============ SEEK SCRAPING ============
+# ============ SEEK SCRAPING VIA SCRAPERAPI ============
 
-SEEK_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-AU,en;q=0.9",
-}
-
-
-def scrape_seek_api(city_key):
+def scrape_seek(city_key):
     jobs = []
     c = CITIES[city_key]
     city_slug = c["name"].replace(" ", "-")
     seek_url = "https://www.seek.com.au/jobs/in-" + city_slug + "-" + c["state"] + "-" + c["postcode"] + "?daterange=1&sortmode=ListedDate&distance=20"
-    proxy_url = "http://api.scraperapi.com?api_key=5099bc637688fdd9abf7db48c9fec7e9&url=" + seek_url + "&render=true"
+    proxy_url = "http://api.scraperapi.com?api_key=" + SCRAPER_API_KEY + "&url=" + seek_url + "&render=true"
+    log.info("Scraping " + city_key + " via ScraperAPI...")
     try:
-        r = requests.get(proxy_url, timeout=60)
-        log.info("Seek response for " + city_key + ": " + str(r.status_code))
+        r = requests.get(proxy_url, timeout=90)
+        log.info("ScraperAPI response for " + city_key + ": " + str(r.status_code) + " len=" + str(len(r.text)))
         if r.status_code != 200:
+            log.warning("ScraperAPI returned " + str(r.status_code) + " for " + city_key)
             return []
-        text = r.text
-        pattern = r'"title":"([^"]+)".*?"advertiser":\{"description":"([^"]*)".*?"id":(\d+).*?"teaser":"([^"]*)"'
-        matches = re.findall(pattern, text)
-        for m in matches:
+        html = r.text
+        # Method 1: Try to find JSON data in the page
+        json_match = re.search(r'window\.SEEK_REDUX_DATA\s*=\s*(\{.+?\});', html, re.DOTALL)
+        if json_match:
+            try:
+                redux = json.loads(json_match.group(1))
+                job_list = redux.get("results", {}).get("results", {}).get("jobs", [])
+                for item in job_list:
+                    job = {
+                        "title": item.get("title", ""),
+                        "company": item.get("advertiser", {}).get("description", ""),
+                        "location": item.get("location", ""),
+                        "subClass": item.get("subClassification", {}).get("description", ""),
+                        "classification": item.get("classification", {}).get("description", ""),
+                        "contractType": item.get("workType", ""),
+                        "salary": item.get("salary", ""),
+                        "link": "https://www.seek.com.au/job/" + str(item.get("id", "")),
+                        "fullText": item.get("teaser", ""),
+                    }
+                    if job["title"]:
+                        jobs.append(job)
+                log.info(city_key + ": found " + str(len(jobs)) + " jobs via REDUX")
+                if jobs:
+                    return jobs[:20]
+            except Exception as e:
+                log.warning("Redux parse failed: " + str(e))
+        # Method 2: Try to find job data in any JSON blob
+        json_blobs = re.findall(r'\{"title":"[^"]+","id":\d+[^}]+\}', html)
+        for blob in json_blobs:
+            try:
+                item = json.loads(blob)
+                job = {
+                    "title": item.get("title", ""),
+                    "company": item.get("advertiser", {}).get("description", "") if isinstance(item.get("advertiser"), dict) else "",
+                    "location": item.get("location", "") if isinstance(item.get("location"), str) else "",
+                    "subClass": "",
+                    "classification": "",
+                    "contractType": item.get("workType", ""),
+                    "salary": "",
+                    "link": "https://www.seek.com.au/job/" + str(item.get("id", "")),
+                    "fullText": item.get("teaser", ""),
+                }
+                if job["title"] and job["link"] != "https://www.seek.com.au/job/":
+                    jobs.append(job)
+            except Exception:
+                pass
+        if jobs:
+            log.info(city_key + ": found " + str(len(jobs)) + " jobs via JSON blobs")
+            return jobs[:20]
+        # Method 3: Regex on raw HTML for job cards
+        title_matches = re.findall(r'<a[^>]*href="(/job/(\d+)[^"]*)"[^>]*>([^<]+)</a>', html)
+        seen_ids = set()
+        for href, job_id, title in title_matches:
+            if job_id in seen_ids:
+                continue
+            if len(title) < 5:
+                continue
+            seen_ids.add(job_id)
             job = {
-                "title": m[0],
-                "company": m[1],
+                "title": title.strip(),
+                "company": "",
                 "location": "",
                 "subClass": "",
                 "classification": "",
                 "contractType": "",
                 "salary": "",
-                "link": "https://www.seek.com.au/job/" + m[2],
-                "fullText": m[3],
+                "link": "https://www.seek.com.au/job/" + job_id,
+                "fullText": "",
             }
-            if job["title"]:
-                jobs.append(job)
-        log.info(city_key + " parsed " + str(len(jobs)) + " jobs from HTML")
+            jobs.append(job)
+        log.info(city_key + ": found " + str(len(jobs)) + " jobs via HTML regex")
     except Exception as e:
-        log.warning("Seek failed for " + city_key + ": " + str(e))
-    return jobs[:20]
-                job = {
-                    "title": item.get("title", ""),
-                    "company": item.get("advertiser", {}).get("description", ""),
-                    "location": item.get("location", ""),
-                    "subClass": item.get("subClassification", {}).get("description", ""),
-                    "classification": item.get("classification", {}).get("description", ""),
-                    "contractType": item.get("workType", ""),
-                    "salary": item.get("salary", ""),
-                    "link": "https://www.seek.com.au/job/" + str(item.get("id", "")),
-                    "fullText": item.get("teaser", ""),
-                }
-                if job["title"]:
-                    jobs.append(job)
-    except Exception as e:
-        log.warning("Seek API failed for " + city_key + ": " + str(e))
+        log.error("Scrape failed for " + city_key + ": " + str(e))
     return jobs[:20]
 
 
@@ -376,7 +409,7 @@ def format_job_free(job, city_name, requirements):
     if requirements:
         lines.append("⚠️ " + ", ".join(requirements))
     lines.append("")
-    lines.append("_⭐ Lien de candidature reserve aux membres Pro -> @backpackradar\\_bot_")
+    lines.append("_Lien reserve aux membres Pro -> @backpackradar\\_bot /premium_")
     return "\n".join(lines)
 
 
@@ -394,15 +427,14 @@ async def cmd_start(update, context):
         msg += "Ta ville : *" + city_name + "*\n"
         msg += "Ton plan : *" + plan.upper() + "*\n\n"
         if city_key in CITIES:
-            msg += "📢 Ton canal FREE : " + CITIES[city_key]["free"] + "\n"
+            msg += "📢 Canal FREE : " + CITIES[city_key]["free"] + "\n"
             if plan == "premium":
-                msg += "⭐ Ton canal PRO : " + CITIES[city_key]["pro"] + "\n"
+                msg += "⭐ Canal PRO : " + CITIES[city_key]["pro"] + "\n"
         msg += "\n/city - Changer de ville\n"
         msg += "/premium - Passer Pro\n"
         msg += "/status - Voir ton compte"
         await update.message.reply_text(msg, parse_mode="Markdown")
         return
-
     keyboard = []
     row = []
     for key, city in CITIES.items():
@@ -412,11 +444,10 @@ async def cmd_start(update, context):
             row = []
     if row:
         keyboard.append(row)
-
     msg = "🎒 *Bienvenue sur BackpackRadar !*\n\n"
     msg += "Je trouve les meilleurs jobs WHV/PVT en Australie et je les poste dans des canaux Telegram par ville.\n\n"
-    msg += "🆓 *Plan Gratuit* : 3 offres/jour dans le canal de ta ville (sans lien)\n"
-    msg += "⭐ *Plan Pro* ($9.99/mois) : Toutes les offres + liens directs pour postuler\n\n"
+    msg += "🆓 *Plan Gratuit* : Canal FREE de ta ville (offres sans lien)\n"
+    msg += "⭐ *Plan Pro* ($9.99/mois) : Canal PRO avec liens directs pour postuler\n\n"
     msg += "Choisis ta ville pour commencer :"
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -440,16 +471,13 @@ async def cmd_premium(update, context):
     if existing and existing.get("plan") == "premium":
         await update.message.reply_text("Tu es deja Pro ! ✨")
         return
-
     payment_url = STRIPE_PAYMENT_LINK + "?client_reference_id=" + str(user.id)
-
     msg = "⭐ *BackpackRadar Pro*\n\n"
     msg += "✅ Toutes les offres WHV en temps reel\n"
     msg += "✅ Lien direct pour postuler en 1 clic\n"
     msg += "✅ Toutes les villes d Australie\n\n"
-    msg += "💰 *$9.99 AUD/mois*\n\n"
-
-    keyboard = [[InlineKeyboardButton("💳 S abonner maintenant", url=payment_url)]]
+    msg += "💰 *$9.99 AUD/mois*\n"
+    keyboard = [[InlineKeyboardButton("💳 S abonner", url=payment_url)]]
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
@@ -486,25 +514,21 @@ async def callback_handler(update, context):
     await query.answer()
     data = query.data
     user = query.from_user
-
     if data.startswith("city_"):
         city_key = data.replace("city_", "")
         if city_key not in CITIES:
             await query.edit_message_text("Ville non reconnue.")
             return
-
         existing = get_user(user.id)
         if existing:
             update_user(user.id, {"city": city_key})
         else:
             create_user(user.id, user.username or str(user.id), city_key, "free")
-
         city = CITIES[city_key]
         msg = "✅ Parfait !\n\n"
         msg += "👉 Rejoins ton canal FREE : " + city["free"] + "\n\n"
-        msg += "Tu y recevras 3 offres WHV par jour pour *" + city["name"] + "*.\n\n"
-        msg += "⭐ Pour toutes les offres + liens directs :\n"
-        msg += "/premium"
+        msg += "Tu y recevras les offres WHV pour *" + city["name"] + "*.\n\n"
+        msg += "⭐ Pour les liens directs : /premium"
         await query.edit_message_text(msg, parse_mode="Markdown")
 
 
@@ -525,27 +549,15 @@ async def cmd_activate(update, context):
     city_key = user_data.get("city", "")
     if city_key in CITIES:
         try:
-            await context.bot.unban_chat_member(
-                chat_id=CITIES[city_key]["pro"],
-                user_id=target_id,
-                only_if_banned=True
-            )
-        except Exception:
-            pass
-        pro_link = CITIES[city_key]["pro"]
-        try:
-            invite = await context.bot.create_chat_invite_link(
-                chat_id=pro_link,
-                member_limit=1
-            )
+            invite = await context.bot.create_chat_invite_link(chat_id=CITIES[city_key]["pro"], member_limit=1)
             msg = "🎉 *Ton compte est maintenant Pro !*\n\n"
             msg += "👉 Rejoins ton canal Pro : " + invite.invite_link + "\n\n"
             msg += "Merci ! 🙏"
             await context.bot.send_message(target_id, msg, parse_mode="Markdown")
         except Exception as e:
-            await context.bot.send_message(target_id, "🎉 *Ton compte est Pro !*\nContacte @backpackradar\\_support pour le lien.", parse_mode="Markdown")
-            log.warning("Could not create invite: " + str(e))
-    await update.message.reply_text("✅ User " + str(target_id) + " active en Pro.")
+            log.warning("Invite error: " + str(e))
+            await context.bot.send_message(target_id, "🎉 Ton compte est Pro ! Contacte l admin pour le lien du canal.")
+    await update.message.reply_text("✅ " + str(target_id) + " active en Pro.")
 
 
 async def cmd_deactivate(update, context):
@@ -563,17 +575,14 @@ async def cmd_deactivate(update, context):
     city_key = user_data.get("city", "")
     if city_key in CITIES:
         try:
-            await context.bot.ban_chat_member(
-                chat_id=CITIES[city_key]["pro"],
-                user_id=target_id
-            )
+            await context.bot.ban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
         except Exception:
             pass
     try:
         await context.bot.send_message(target_id, "Ton abonnement Pro a expire. /premium pour te re-abonner.")
     except Exception:
         pass
-    await update.message.reply_text("User " + str(target_id) + " desactive.")
+    await update.message.reply_text(str(target_id) + " desactive.")
 
 
 async def cmd_stats(update, context):
@@ -585,10 +594,7 @@ async def cmd_stats(update, context):
         users = r.json()
         total = len(users)
         premium = sum(1 for u in users if u.get("plan") == "premium")
-        msg = "📊 *Stats*\n\n"
-        msg += "👥 Total : " + str(total) + "\n"
-        msg += "⭐ Pro : " + str(premium) + "\n"
-        msg += "💰 ~$" + str(int(premium * 9.99)) + "/mois"
+        msg = "📊 *Stats*\n👥 " + str(total) + " users | ⭐ " + str(premium) + " pro | 💰 $" + str(int(premium * 9.99)) + "/mois"
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text("Erreur: " + str(e))
@@ -599,21 +605,18 @@ async def cmd_stats(update, context):
 async def post_job_to_channels(bot, job, city_key, requirements):
     city = CITIES[city_key]
     city_name = city["name"]
-
-    # Post to PRO channel (with link)
     try:
         pro_msg = format_job_pro(job, city_name, requirements)
         await bot.send_message(chat_id=city["pro"], text=pro_msg, parse_mode="Markdown")
+        log.info("Posted to PRO " + city_key)
     except Exception as e:
-        log.warning("Failed to post to PRO " + city_key + ": " + str(e))
-
-    # Post to FREE channel (without link, max 3/day tracked in channel)
+        log.warning("PRO post failed " + city_key + ": " + str(e))
     try:
         free_msg = format_job_free(job, city_name, requirements)
         await bot.send_message(chat_id=city["free"], text=free_msg, parse_mode="Markdown")
+        log.info("Posted to FREE " + city_key)
     except Exception as e:
-        log.warning("Failed to post to FREE " + city_key + ": " + str(e))
-
+        log.warning("FREE post failed " + city_key + ": " + str(e))
     await asyncio.sleep(0.5)
 
 
@@ -623,27 +626,22 @@ async def scraping_loop(app):
     bot = app.bot
     cycle = 0
     last_reset = datetime.utcnow().date()
-
-    log.info("Waiting 10s before starting scrape loop...")
+    log.info("Waiting 10s before first scrape...")
     await asyncio.sleep(10)
     log.info("=== SCRAPING LOOP STARTED ===")
-
     while True:
         cycle += 1
         now = datetime.utcnow()
-
         if now.date() > last_reset:
             reset_daily_counts()
             last_reset = now.date()
-
         log.info("=== CYCLE " + str(cycle) + " - " + now.strftime("%H:%M:%S UTC") + " ===")
-
         total_new = 0
         for city_key in CITIES:
             try:
-                jobs = scrape_seek_api(city_key)
-                log.info(CITIES[city_key]["name"] + ": " + str(len(jobs)) + " jobs found")
-
+                log.info("Starting scrape for " + city_key)
+                jobs = scrape_seek(city_key)
+                log.info(city_key + ": " + str(len(jobs)) + " jobs found")
                 for job in jobs:
                     jh = make_hash(job, city_key)
                     if job_exists(jh):
@@ -655,12 +653,13 @@ async def scraping_loop(app):
                     requirements = detect_requirements(job["title"], job.get("fullText", ""))
                     if save_job(job, city_key, requirements):
                         total_new += 1
-                        log.info("OK: " + job["title"])
+                        log.info("NEW JOB: " + job["title"])
                         await post_job_to_channels(bot, job, city_key, requirements)
             except Exception as e:
                 log.error("ERROR " + city_key + ": " + str(e))
-            await asyncio.sleep(random.randint(5, 15))
-
+            pause = random.randint(10, 20)
+            log.info("Pause " + str(pause) + "s before next city")
+            await asyncio.sleep(pause)
         log.info("Cycle " + str(cycle) + " done - " + str(total_new) + " new jobs")
         wait = random.randint(CHECK_INTERVAL_MIN * 60, CHECK_INTERVAL_MAX * 60)
         log.info("Next cycle in ~" + str(wait // 60) + " min")
@@ -676,12 +675,9 @@ async def post_init(app):
 
 def main():
     log.info("============================================")
-    log.info("   BACKPACKRADAR v2 - Channels + Stripe")
-    log.info("   5 cities | AI Filter | Freemium")
+    log.info("   BACKPACKRADAR FINAL - Channels + Stripe")
     log.info("============================================")
-
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("city", cmd_city))
     app.add_handler(CommandHandler("premium", cmd_premium))
@@ -691,7 +687,6 @@ def main():
     app.add_handler(CommandHandler("deactivate", cmd_deactivate))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CallbackQueryHandler(callback_handler))
-
     app.run_polling(drop_pending_updates=True)
 
 
