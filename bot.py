@@ -30,11 +30,14 @@ SUPABASE_URL = "https://ephveuabosmvrwbnqpdn.supabase.co"
 SUPABASE_KEY = "sb_publishable_YS2C4C5s4VyYKNmN-AMwaQ_Q_E6Ox0P"
 STRIPE_PAYMENT_LINK = "https://buy.stripe.com/28EaEWdyq2dVemNecS1sQ00"
 STRIPE_WEBHOOK_SECRET = "whsec_0FYVWpCFaVxnyZtN8Ag4LiVN0t0yqKFy"
+STRIPE_PORTAL_URL = "https://billing.stripe.com/p/login/28EaEWdyq2dVemNecS1sQ00"
 SCRAPER_API_KEY = "5099bc637688fdd9abf7db48c9fec7e9"
 CHECK_INTERVAL_MIN = 40
 CHECK_INTERVAL_MAX = 50
 ADMIN_IDS = [8416016131]
 WEBHOOK_PORT = 8080
+
+BOT_INSTANCE = None
 
 # ============ CITIES + CHANNELS ============
 CITIES = {
@@ -104,6 +107,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("backpackradar")
 
 
+def html_escape(text):
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def free_link(city_key):
     name = CITIES[city_key]["free"].replace("@", "")
     return "https://t.me/" + name
@@ -121,6 +128,18 @@ def supabase_headers():
 
 def get_user(telegram_id):
     url = SUPABASE_URL + "/rest/v1/users?telegram_id=eq." + str(telegram_id) + "&select=*"
+    try:
+        r = requests.get(url, headers=supabase_headers())
+        data = r.json()
+        if data and len(data) > 0:
+            return data[0]
+    except Exception:
+        pass
+    return None
+
+
+def get_user_by_stripe_customer(customer_id):
+    url = SUPABASE_URL + "/rest/v1/users?stripe_customer_id=eq." + str(customer_id) + "&select=*"
     try:
         r = requests.get(url, headers=supabase_headers())
         data = r.json()
@@ -415,23 +434,23 @@ def detect_requirements(title, full_text):
     return reqs
 
 
-# ============ MESSAGE FORMATTING ============
+# ============ MESSAGE FORMATTING (HTML) ============
 
 def format_job_pro(job, city_name, requirements):
     ct = job.get("contractType", "")
     emoji = {"Full-time": "🟢", "Part-time": "🔵", "Casual": "🟡", "Contract": "🟠"}.get(ct, "💼")
     lines = []
-    lines.append(emoji + " *" + job["title"] + "*")
-    lines.append("🏢 " + job.get("company", "N/A"))
-    lines.append("📍 " + city_name)
+    lines.append(emoji + " <b>" + html_escape(job["title"]) + "</b>")
+    lines.append("🏢 " + html_escape(job.get("company", "N/A")))
+    lines.append("📍 " + html_escape(city_name))
     if job.get("salary"):
-        lines.append("💰 " + job["salary"])
+        lines.append("💰 " + html_escape(job["salary"]))
     if ct:
-        lines.append("📋 " + ct)
+        lines.append("📋 " + html_escape(ct))
     if requirements:
-        lines.append("⚠️ " + ", ".join(requirements))
+        lines.append("⚠️ " + html_escape(", ".join(requirements)))
     lines.append("")
-    lines.append("🔗 [Postuler ici](" + job["link"] + ")")
+    lines.append('🔗 <a href="' + job["link"] + '">Postuler ici</a>')
     return "\n".join(lines)
 
 
@@ -439,28 +458,34 @@ def format_job_free(job, city_name, requirements):
     ct = job.get("contractType", "")
     emoji = {"Full-time": "🟢", "Part-time": "🔵", "Casual": "🟡", "Contract": "🟠"}.get(ct, "💼")
     lines = []
-    lines.append(emoji + " *" + job["title"] + "*")
-    lines.append("🏢 " + job.get("company", "N/A"))
-    lines.append("📍 " + city_name)
+    lines.append(emoji + " <b>" + html_escape(job["title"]) + "</b>")
+    lines.append("🏢 " + html_escape(job.get("company", "N/A")))
+    lines.append("📍 " + html_escape(city_name))
     if job.get("salary"):
-        lines.append("💰 " + job["salary"])
+        lines.append("💰 " + html_escape(job["salary"]))
     if ct:
-        lines.append("📋 " + ct)
+        lines.append("📋 " + html_escape(ct))
     if requirements:
-        lines.append("⚠️ " + ", ".join(requirements))
+        lines.append("⚠️ " + html_escape(", ".join(requirements)))
     lines.append("")
     lines.append("Lien reserve aux membres Pro")
-    lines.append("👉 @backpackradar\\_bot puis /premium")
+    lines.append("👉 @backpackradar_bot puis /premium")
     return "\n".join(lines)
 
 
-# ============ ACTIVATE / DEACTIVATE LOGIC ============
+# ============ ACTIVATE / DEACTIVATE ============
 
-async def do_activate(bot, target_id):
+async def do_activate(bot, target_id, stripe_customer_id=None):
     user_data = get_user(target_id)
     if not user_data:
+        log.warning("do_activate: user " + str(target_id) + " not found")
         return False
-    update_user(target_id, {"plan": "premium"})
+    updates = {"plan": "premium"}
+    if stripe_customer_id:
+        updates["stripe_customer_id"] = stripe_customer_id
+    update_user(target_id, updates)
+    log.info("do_activate: user " + str(target_id) + " -> premium")
+
     invite_links = []
     for city_key in CITIES:
         try:
@@ -470,15 +495,16 @@ async def do_activate(bot, target_id):
         except Exception as e:
             log.warning("Invite error " + city_key + ": " + str(e))
     if invite_links:
-        msg = "🎉 *Ton compte est maintenant Pro !*\n\n"
+        msg = "🎉 <b>Ton compte est maintenant Pro !</b>\n\n"
         msg += "👉 Rejoins tes canaux Pro :\n\n"
         for link in invite_links:
             msg += link + "\n"
+        msg += "\n📋 Gerer ton abonnement : " + STRIPE_PORTAL_URL
         msg += "\nMerci ! 🙏"
         try:
-            await bot.send_message(target_id, msg, parse_mode="Markdown")
-        except Exception:
-            pass
+            await bot.send_message(target_id, msg, parse_mode="HTML")
+        except Exception as e:
+            log.warning("Failed to send activation msg: " + str(e))
     return True
 
 
@@ -503,10 +529,27 @@ async def do_deactivate(bot, target_id):
             except Exception:
                 pass
     delete_invite_links(target_id)
+
+    keyboard = []
+    row = []
+    for key, city in CITIES.items():
+        row.append(InlineKeyboardButton(city["name"], callback_data="city_" + key))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    payment_url = STRIPE_PAYMENT_LINK + "?client_reference_id=" + str(target_id)
+    keyboard.append([InlineKeyboardButton("⭐ Se reabonner Pro", url=payment_url)])
+
+    msg = "😔 <b>Ton abonnement Pro est termine.</b>\n\n"
+    msg += "Tu as ete retire des canaux Pro.\n\n"
+    msg += "Tu peux continuer a utiliser le canal gratuit de ta ville.\n"
+    msg += "👇 Choisis ta ville gratuite ou reabonne-toi :"
     try:
-        await bot.send_message(target_id, "Ton abonnement Pro a expire. /premium pour te re-abonner.")
-    except Exception:
-        pass
+        await bot.send_message(target_id, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        log.warning("Failed to send deactivation msg: " + str(e))
     return True
 
 
@@ -521,17 +564,18 @@ async def cmd_start(update, context):
         city_name = city_info.get("name", "Non definie")
         plan = existing.get("plan", "free")
         msg = "Content de te revoir ! 👋\n\n"
-        msg += "Ta ville : *" + city_name + "*\n"
-        msg += "Ton plan : *" + plan.upper() + "*\n\n"
+        msg += "Ta ville : <b>" + html_escape(city_name) + "</b>\n"
+        msg += "Ton plan : <b>" + plan.upper() + "</b>\n\n"
         if city_key in CITIES:
             msg += "📢 Canal FREE : " + free_link(city_key) + "\n"
             if plan == "premium":
-                msg += "⭐ Canaux PRO : acces via tes liens d invitation\n"
+                msg += "⭐ Canaux PRO : acces via tes liens d'invitation\n"
+                msg += "📋 Gerer ton abo : " + STRIPE_PORTAL_URL + "\n"
         msg += "\n/city - Changer de ville\n"
         msg += "/premium - Passer Pro\n"
         msg += "/status - Voir ton compte\n\n"
         msg += "Questions ? @Backpackradarapp"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await update.message.reply_text(msg, parse_mode="HTML")
         return
     keyboard = []
     row = []
@@ -542,12 +586,12 @@ async def cmd_start(update, context):
             row = []
     if row:
         keyboard.append(row)
-    msg = "🎒 *Bienvenue sur BackpackRadar !*\n\n"
+    msg = "🎒 <b>Bienvenue sur BackpackRadar !</b>\n\n"
     msg += "Je trouve les meilleurs jobs WHV/PVT en Australie et je les poste dans des canaux Telegram par ville.\n\n"
-    msg += "🆓 *Plan Gratuit* : Canal FREE de ta ville (offres sans lien)\n"
-    msg += "⭐ *Plan Pro* ($9.99/mois) : Canal PRO avec liens directs pour postuler\n\n"
+    msg += "🆓 <b>Plan Gratuit</b> : Canal FREE de ta ville (offres sans lien)\n"
+    msg += "⭐ <b>Plan Pro</b> ($9.99/mois) : Canal PRO avec liens directs pour postuler\n\n"
     msg += "Choisis ta ville pour commencer :"
-    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def cmd_city(update, context):
@@ -567,16 +611,19 @@ async def cmd_premium(update, context):
     user = update.effective_user
     existing = get_user(user.id)
     if existing and existing.get("plan") == "premium":
-        await update.message.reply_text("Tu es deja Pro ! ✨")
+        msg = "Tu es deja Pro ! ✨\n\n"
+        msg += "📋 Gerer ton abonnement (resilier, changer de carte) :\n"
+        msg += STRIPE_PORTAL_URL
+        await update.message.reply_text(msg)
         return
     payment_url = STRIPE_PAYMENT_LINK + "?client_reference_id=" + str(user.id)
-    msg = "⭐ *BackpackRadar Pro*\n\n"
+    msg = "⭐ <b>BackpackRadar Pro</b>\n\n"
     msg += "✅ Toutes les offres WHV en temps reel\n"
     msg += "✅ Lien direct pour postuler en 1 clic\n"
-    msg += "✅ Toutes les villes d Australie\n\n"
-    msg += "💰 *$9.99 AUD/mois*\n"
-    keyboard = [[InlineKeyboardButton("💳 S abonner", url=payment_url)]]
-    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    msg += "✅ Toutes les villes d'Australie\n\n"
+    msg += "💰 <b>$9.99 AUD/mois</b>\n"
+    keyboard = [[InlineKeyboardButton("💳 S'abonner", url=payment_url)]]
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def cmd_status(update, context):
@@ -588,24 +635,29 @@ async def cmd_status(update, context):
     city_info = CITIES.get(city_key, {})
     city_name = city_info.get("name", "Non definie")
     plan = user_data.get("plan", "free").upper()
-    msg = "📋 *Ton compte*\n\n"
-    msg += "📍 Ville : *" + city_name + "*\n"
-    msg += "💎 Plan : *" + plan + "*\n"
+    msg = "📋 <b>Ton compte</b>\n\n"
+    msg += "📍 Ville : <b>" + html_escape(city_name) + "</b>\n"
+    msg += "💎 Plan : <b>" + plan + "</b>\n"
     if city_key in CITIES:
         msg += "📢 Canal FREE : " + free_link(city_key) + "\n"
-        if user_data.get("plan") == "premium":
-            msg += "⭐ Canaux PRO : acces via tes liens d invitation\n"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    if user_data.get("plan") == "premium":
+        msg += "⭐ Canaux PRO : acces via tes liens d'invitation\n"
+        msg += "\n📋 Gerer / resilier ton abo :\n" + STRIPE_PORTAL_URL + "\n"
+        await update.message.reply_text(msg, parse_mode="HTML")
+    else:
+        payment_url = STRIPE_PAYMENT_LINK + "?client_reference_id=" + str(update.effective_user.id)
+        keyboard = [[InlineKeyboardButton("⭐ Passer Pro", url=payment_url)]]
+        await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def cmd_help(update, context):
-    msg = "🎒 *BackpackRadar*\n\n"
+    msg = "🎒 <b>BackpackRadar</b>\n\n"
     msg += "/start - Accueil\n"
     msg += "/city - Changer de ville\n"
     msg += "/premium - Passer Pro\n"
     msg += "/status - Ton compte\n\n"
     msg += "Questions ? @Backpackradarapp"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.message.reply_text(msg, parse_mode="HTML")
 
 
 async def callback_handler(update, context):
@@ -625,11 +677,11 @@ async def callback_handler(update, context):
             create_user(user.id, user.username or str(user.id), city_key, "free")
         city = CITIES[city_key]
         msg = "✅ Parfait !\n\n"
-        msg += "Tu recevras les offres WHV pour *" + city["name"] + "*.\n\n"
+        msg += "Tu recevras les offres WHV pour <b>" + html_escape(city["name"]) + "</b>.\n\n"
         msg += "⭐ Pour les liens directs : /premium"
-        fl = "https://t.me/" + city["free"].replace("@", "")
+        fl = free_link(city_key)
         keyboard = [[InlineKeyboardButton("👉 Rejoins le canal " + city["name"], url=fl)]]
-        await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 # ============ ADMIN COMMANDS ============
@@ -671,8 +723,8 @@ async def cmd_stats(update, context):
         users = r.json()
         total = len(users)
         premium = sum(1 for u in users if u.get("plan") == "premium")
-        msg = "📊 *Stats*\n👥 " + str(total) + " users | ⭐ " + str(premium) + " pro | 💰 $" + str(int(premium * 9.99)) + "/mois"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        msg = "📊 <b>Stats</b>\n👥 " + str(total) + " users | ⭐ " + str(premium) + " pro | 💰 $" + str(int(premium * 9.99)) + "/mois"
+        await update.message.reply_text(msg, parse_mode="HTML")
     except Exception as e:
         await update.message.reply_text("Erreur: " + str(e))
 
@@ -684,13 +736,13 @@ async def post_job_to_channels(bot, job, city_key, requirements):
     city_name = city["name"]
     try:
         pro_msg = format_job_pro(job, city_name, requirements)
-        await bot.send_message(chat_id=city["pro"], text=pro_msg, parse_mode="Markdown")
+        await bot.send_message(chat_id=city["pro"], text=pro_msg, parse_mode="HTML")
         log.info("Posted to PRO " + city_key)
     except Exception as e:
         log.warning("PRO post failed " + city_key + ": " + str(e))
     try:
         free_msg = format_job_free(job, city_name, requirements)
-        await bot.send_message(chat_id=city["free"], text=free_msg, parse_mode="Markdown")
+        await bot.send_message(chat_id=city["free"], text=free_msg, parse_mode="HTML")
         log.info("Posted to FREE " + city_key)
     except Exception as e:
         log.warning("FREE post failed " + city_key + ": " + str(e))
@@ -746,9 +798,11 @@ async def scraping_loop(app):
 # ============ STRIPE WEBHOOK SERVER ============
 
 async def stripe_webhook_handler(request):
+    global BOT_INSTANCE
     payload = await request.read()
     sig_header = request.headers.get("Stripe-Signature", "")
-    log.info("Stripe webhook received")
+    log.info("Stripe webhook received, payload length: " + str(len(payload)))
+
     try:
         elements = {}
         for element in sig_header.split(","):
@@ -756,6 +810,9 @@ async def stripe_webhook_handler(request):
             elements[key] = value
         timestamp = elements.get("t", "")
         signature = elements.get("v1", "")
+        if not timestamp or not signature:
+            log.warning("Stripe: missing t or v1")
+            return web.Response(status=400, text="Bad signature")
         signed_payload = timestamp + "." + payload.decode("utf-8")
         expected_sig = hmac.new(
             STRIPE_WEBHOOK_SECRET.encode("utf-8"),
@@ -763,33 +820,58 @@ async def stripe_webhook_handler(request):
             hashlib.sha256
         ).hexdigest()
         if not hmac.compare_digest(signature, expected_sig):
-            log.warning("Stripe webhook signature mismatch")
+            log.warning("Stripe: signature mismatch")
             return web.Response(status=400, text="Bad signature")
+        log.info("Stripe: signature OK")
     except Exception as e:
-        log.warning("Stripe signature check failed: " + str(e))
+        log.warning("Stripe: signature error: " + str(e))
+        return web.Response(status=400, text="Signature error")
+
     try:
         event = json.loads(payload)
     except Exception:
         return web.Response(status=400, text="Bad JSON")
+
     event_type = event.get("type", "")
     log.info("Stripe event: " + event_type)
+
+    bot = BOT_INSTANCE
+    if not bot:
+        log.error("BOT_INSTANCE not set!")
+        return web.Response(status=500, text="Bot not ready")
+
     if event_type == "checkout.session.completed":
         session = event.get("data", {}).get("object", {})
         client_ref = session.get("client_reference_id", "")
-        if client_ref:
-            target_id = int(client_ref)
-            log.info("Stripe: activating user " + str(target_id))
-            bot = Bot(token=TELEGRAM_TOKEN)
-            async with bot:
-                await do_activate(bot, target_id)
-    elif event_type == "customer.subscription.deleted":
-        session = event.get("data", {}).get("object", {})
         customer_id = session.get("customer", "")
+        log.info("Checkout: ref=" + str(client_ref) + " customer=" + str(customer_id))
+        if client_ref:
+            try:
+                target_id = int(client_ref)
+                result = await do_activate(bot, target_id, stripe_customer_id=customer_id)
+                log.info("Activation result: " + str(result))
+            except Exception as e:
+                log.error("Activation error: " + str(e))
+        else:
+            log.warning("No client_reference_id!")
+
+    elif event_type == "customer.subscription.deleted":
+        sub = event.get("data", {}).get("object", {})
+        customer_id = sub.get("customer", "")
+        log.info("Subscription deleted: customer=" + customer_id)
         if customer_id:
-            log.info("Stripe: subscription deleted for customer " + customer_id)
-            # Find user by customer_id - check recent checkout sessions
-            # For now, log it - manual deactivate may be needed for subscription deletions
-            log.info("Manual /deactivate may be needed for customer: " + customer_id)
+            user_data = get_user_by_stripe_customer(customer_id)
+            if user_data:
+                target_id = user_data["telegram_id"]
+                log.info("Deactivating user " + str(target_id))
+                try:
+                    await do_deactivate(bot, target_id)
+                    log.info("User " + str(target_id) + " deactivated OK")
+                except Exception as e:
+                    log.error("Deactivation error: " + str(e))
+            else:
+                log.warning("No user found for customer " + customer_id)
+
     return web.Response(status=200, text="OK")
 
 
@@ -811,15 +893,18 @@ async def start_webhook_server():
 # ============ MAIN ============
 
 async def post_init(app):
+    global BOT_INSTANCE
+    BOT_INSTANCE = app.bot
+    log.info("BOT_INSTANCE set OK")
     asyncio.create_task(scraping_loop(app))
     log.info("Scraping task created")
     await start_webhook_server()
-    log.info("Webhook server task created")
+    log.info("Webhook server started")
 
 
 def main():
     log.info("============================================")
-    log.info("   BACKPACKRADAR FINAL + STRIPE AUTO")
+    log.info("   BACKPACKRADAR - FULL AUTO STRIPE")
     log.info("============================================")
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", cmd_start))
