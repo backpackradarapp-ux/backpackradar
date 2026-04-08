@@ -4,7 +4,10 @@ import json
 import logging
 import random
 import re
+import hmac
+import time
 from datetime import datetime
+from aiohttp import web
 
 import requests
 from telegram import (
@@ -26,10 +29,12 @@ ANTHROPIC_KEY = __import__('os').environ.get("ANTHROPIC_KEY", "")
 SUPABASE_URL = "https://ephveuabosmvrwbnqpdn.supabase.co"
 SUPABASE_KEY = "sb_publishable_YS2C4C5s4VyYKNmN-AMwaQ_Q_E6Ox0P"
 STRIPE_PAYMENT_LINK = "https://buy.stripe.com/28EaEWdyq2dVemNecS1sQ00"
+STRIPE_WEBHOOK_SECRET = "whsec_D9QxgXKQj1vUUTLxXmO869109Xfp5Xez"
 SCRAPER_API_KEY = "5099bc637688fdd9abf7db48c9fec7e9"
 CHECK_INTERVAL_MIN = 40
 CHECK_INTERVAL_MAX = 50
 ADMIN_IDS = [8416016131]
+WEBHOOK_PORT = 8080
 
 # ============ CITIES + CHANNELS ============
 CITIES = {
@@ -100,7 +105,8 @@ log = logging.getLogger("backpackradar")
 
 
 def free_link(city_key):
-    return "https://t.me/" + CITIES[city_key]["free"].replace("@", "")
+    name = CITIES[city_key]["free"].replace("@", "")
+    return "https://t.me/" + name
 
 
 # ============ SUPABASE ============
@@ -202,7 +208,8 @@ def save_job(job, city, requirements):
         return r.status_code in [200, 201]
     except Exception:
         return False
-        
+
+
 def save_invite_link(telegram_id, city, invite_link):
     url = SUPABASE_URL + "/rest/v1/invite_links"
     headers = supabase_headers()
@@ -237,7 +244,6 @@ def delete_invite_links(telegram_id):
         pass
 
 
-
 # ============ SEEK SCRAPING VIA SCRAPERAPI ============
 
 def scrape_seek(city_key):
@@ -251,7 +257,6 @@ def scrape_seek(city_key):
         r = requests.get(proxy_url, timeout=90)
         log.info("ScraperAPI response for " + city_key + ": " + str(r.status_code) + " len=" + str(len(r.text)))
         if r.status_code != 200:
-            log.warning("ScraperAPI returned " + str(r.status_code) + " for " + city_key)
             return []
         html = r.text
         json_match = re.search(r'window\.SEEK_REDUX_DATA\s*=\s*(\{.+?\});', html, re.DOTALL)
@@ -449,6 +454,62 @@ def format_job_free(job, city_name, requirements):
     return "\n".join(lines)
 
 
+# ============ ACTIVATE / DEACTIVATE LOGIC ============
+
+async def do_activate(bot, target_id):
+    user_data = get_user(target_id)
+    if not user_data:
+        return False
+    update_user(target_id, {"plan": "premium"})
+    invite_links = []
+    for city_key in CITIES:
+        try:
+            invite = await bot.create_chat_invite_link(chat_id=CITIES[city_key]["pro"], member_limit=1)
+            invite_links.append(CITIES[city_key]["name"] + " : " + invite.invite_link)
+            save_invite_link(target_id, city_key, invite.invite_link)
+        except Exception as e:
+            log.warning("Invite error " + city_key + ": " + str(e))
+    if invite_links:
+        msg = "🎉 *Ton compte est maintenant Pro !*\n\n"
+        msg += "👉 Rejoins tes canaux Pro :\n\n"
+        for link in invite_links:
+            msg += link + "\n"
+        msg += "\nMerci ! 🙏"
+        try:
+            await bot.send_message(target_id, msg, parse_mode="Markdown")
+        except Exception:
+            pass
+    return True
+
+
+async def do_deactivate(bot, target_id):
+    user_data = get_user(target_id)
+    if not user_data:
+        return False
+    update_user(target_id, {"plan": "free"})
+    old_links = get_invite_links(target_id)
+    for link_data in old_links:
+        city_key = link_data.get("city", "")
+        invite_link = link_data.get("invite_link", "")
+        if city_key in CITIES:
+            try:
+                await bot.ban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
+                await asyncio.sleep(1)
+                await bot.unban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
+            except Exception:
+                pass
+            try:
+                await bot.revoke_chat_invite_link(chat_id=CITIES[city_key]["pro"], invite_link=invite_link)
+            except Exception:
+                pass
+    delete_invite_links(target_id)
+    try:
+        await bot.send_message(target_id, "Ton abonnement Pro a expire. /premium pour te re-abonner.")
+    except Exception:
+        pass
+    return True
+
+
 # ============ TELEGRAM COMMANDS ============
 
 async def cmd_start(update, context):
@@ -580,30 +641,11 @@ async def cmd_activate(update, context):
         await update.message.reply_text("Usage: /activate <telegram_id>")
         return
     target_id = int(context.args[0])
-    user_data = get_user(target_id)
-    if not user_data:
+    result = await do_activate(context.bot, target_id)
+    if result:
+        await update.message.reply_text("✅ " + str(target_id) + " active en Pro.")
+    else:
         await update.message.reply_text("User pas trouve.")
-        return
-    update_user(target_id, {"plan": "premium"})
-    invite_links = []
-    for city_key in CITIES:
-        try:
-            invite = await context.bot.create_chat_invite_link(chat_id=CITIES[city_key]["pro"], member_limit=1)
-            invite_links.append(CITIES[city_key]["name"] + " : " + invite.invite_link)
-            save_invite_link(target_id, city_key, invite.invite_link)
-        except Exception as e:
-            log.warning("Invite error " + city_key + ": " + str(e))
-    if invite_links:
-        msg = "🎉 *Ton compte est maintenant Pro !*\n\n"
-        msg += "👉 Rejoins tes canaux Pro :\n\n"
-        for link in invite_links:
-            msg += link + "\n"
-        msg += "\nMerci ! 🙏"
-        try:
-            await context.bot.send_message(target_id, msg, parse_mode="Markdown")
-        except Exception:
-            pass
-    await update.message.reply_text("✅ " + str(target_id) + " active en Pro.")
 
 
 async def cmd_deactivate(update, context):
@@ -613,32 +655,12 @@ async def cmd_deactivate(update, context):
         await update.message.reply_text("Usage: /deactivate <telegram_id>")
         return
     target_id = int(context.args[0])
-    user_data = get_user(target_id)
-    if not user_data:
+    result = await do_deactivate(context.bot, target_id)
+    if result:
+        await update.message.reply_text(str(target_id) + " desactive.")
+    else:
         await update.message.reply_text("User pas trouve.")
-        return
-    update_user(target_id, {"plan": "free"})
-    old_links = get_invite_links(target_id)
-    for link_data in old_links:
-        city_key = link_data.get("city", "")
-        invite_link = link_data.get("invite_link", "")
-        if city_key in CITIES:
-            try:
-                await context.bot.ban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
-                await asyncio.sleep(1)
-                await context.bot.unban_chat_member(chat_id=CITIES[city_key]["pro"], user_id=target_id)
-            except Exception:
-                pass
-            try:
-                await context.bot.revoke_chat_invite_link(chat_id=CITIES[city_key]["pro"], invite_link=invite_link)
-            except Exception:
-                pass
-    delete_invite_links(target_id)
-    try:
-        await context.bot.send_message(target_id, "Ton abonnement Pro a expire. /premium pour te re-abonner.")
-    except Exception:
-        pass
-    await update.message.reply_text(str(target_id) + " desactive.")
+
 
 async def cmd_stats(update, context):
     if update.effective_user.id not in ADMIN_IDS:
@@ -721,16 +743,83 @@ async def scraping_loop(app):
         await asyncio.sleep(wait)
 
 
+# ============ STRIPE WEBHOOK SERVER ============
+
+async def stripe_webhook_handler(request):
+    payload = await request.read()
+    sig_header = request.headers.get("Stripe-Signature", "")
+    log.info("Stripe webhook received")
+    try:
+        elements = {}
+        for element in sig_header.split(","):
+            key, value = element.strip().split("=", 1)
+            elements[key] = value
+        timestamp = elements.get("t", "")
+        signature = elements.get("v1", "")
+        signed_payload = timestamp + "." + payload.decode("utf-8")
+        expected_sig = hmac.new(
+            STRIPE_WEBHOOK_SECRET.encode("utf-8"),
+            signed_payload.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_sig):
+            log.warning("Stripe webhook signature mismatch")
+            return web.Response(status=400, text="Bad signature")
+    except Exception as e:
+        log.warning("Stripe signature check failed: " + str(e))
+    try:
+        event = json.loads(payload)
+    except Exception:
+        return web.Response(status=400, text="Bad JSON")
+    event_type = event.get("type", "")
+    log.info("Stripe event: " + event_type)
+    if event_type == "checkout.session.completed":
+        session = event.get("data", {}).get("object", {})
+        client_ref = session.get("client_reference_id", "")
+        if client_ref:
+            target_id = int(client_ref)
+            log.info("Stripe: activating user " + str(target_id))
+            bot = Bot(token=TELEGRAM_TOKEN)
+            async with bot:
+                await do_activate(bot, target_id)
+    elif event_type == "customer.subscription.deleted":
+        session = event.get("data", {}).get("object", {})
+        customer_id = session.get("customer", "")
+        if customer_id:
+            log.info("Stripe: subscription deleted for customer " + customer_id)
+            # Find user by customer_id - check recent checkout sessions
+            # For now, log it - manual deactivate may be needed for subscription deletions
+            log.info("Manual /deactivate may be needed for customer: " + customer_id)
+    return web.Response(status=200, text="OK")
+
+
+async def health_check(request):
+    return web.Response(status=200, text="BackpackRadar running")
+
+
+async def start_webhook_server():
+    app_web = web.Application()
+    app_web.router.add_post("/stripe-webhook", stripe_webhook_handler)
+    app_web.router.add_get("/", health_check)
+    runner = web.AppRunner(app_web)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
+    await site.start()
+    log.info("Webhook server started on port " + str(WEBHOOK_PORT))
+
+
 # ============ MAIN ============
 
 async def post_init(app):
     asyncio.create_task(scraping_loop(app))
     log.info("Scraping task created")
+    await start_webhook_server()
+    log.info("Webhook server task created")
 
 
 def main():
     log.info("============================================")
-    log.info("   BACKPACKRADAR FINAL")
+    log.info("   BACKPACKRADAR FINAL + STRIPE AUTO")
     log.info("============================================")
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", cmd_start))
