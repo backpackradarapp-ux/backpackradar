@@ -21,6 +21,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 # ============ CONFIG ============
@@ -501,6 +503,7 @@ async def do_activate(bot, target_id, stripe_customer_id=None):
             msg += link + "\n"
         msg += "\n📋 Gerer ton abonnement : " + STRIPE_PORTAL_URL
         msg += "\nMerci ! 🙏"
+        msg += "\n\n❓ Une question ? @Backpackradarapp"
         try:
             await bot.send_message(target_id, msg, parse_mode="HTML")
         except Exception as e:
@@ -546,6 +549,7 @@ async def do_deactivate(bot, target_id):
     msg += "Tu as ete retire des canaux Pro.\n\n"
     msg += "Tu peux continuer a utiliser le canal gratuit de ta ville.\n"
     msg += "👇 Choisis ta ville gratuite ou reabonne-toi :"
+    msg += "\n\n❓ Une question ? @Backpackradarapp"
     try:
         await bot.send_message(target_id, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
@@ -614,6 +618,7 @@ async def cmd_premium(update, context):
         msg = "Tu es deja Pro ! ✨\n\n"
         msg += "📋 Gerer ton abonnement (resilier, changer de carte) :\n"
         msg += STRIPE_PORTAL_URL
+        msg += "\n\n❓ Une question ? @Backpackradarapp"
         await update.message.reply_text(msg)
         return
     payment_url = STRIPE_PAYMENT_LINK + "?client_reference_id=" + str(user.id)
@@ -622,6 +627,7 @@ async def cmd_premium(update, context):
     msg += "✅ Lien direct pour postuler en 1 clic\n"
     msg += "✅ Toutes les villes d'Australie\n\n"
     msg += "💰 <b>$9.99 AUD/mois</b>\n"
+    msg += "\n❓ Une question ? @Backpackradarapp"
     keyboard = [[InlineKeyboardButton("💳 S'abonner", url=payment_url)]]
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -679,9 +685,22 @@ async def callback_handler(update, context):
         msg = "✅ Parfait !\n\n"
         msg += "Tu recevras les offres WHV pour <b>" + html_escape(city["name"]) + "</b>.\n\n"
         msg += "⭐ Pour les liens directs : /premium"
+        msg += "\n\n❓ Une question ? @Backpackradarapp"
         fl = free_link(city_key)
         keyboard = [[InlineKeyboardButton("👉 Rejoins le canal " + city["name"], url=fl)]]
         await query.edit_message_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+# ============ FALLBACK (message texte random) ============
+
+async def fallback_message(update, context):
+    msg = "🤔 Je ne comprends que les commandes !\n\n"
+    msg += "/start - Accueil\n"
+    msg += "/city - Changer de ville\n"
+    msg += "/premium - Passer Pro\n"
+    msg += "/status - Ton compte\n\n"
+    msg += "❓ Une question ? Contacte-nous : @Backpackradarapp"
+    await update.message.reply_text(msg)
 
 
 # ============ ADMIN COMMANDS ============
@@ -916,6 +935,7 @@ def main():
     app.add_handler(CommandHandler("deactivate", cmd_deactivate))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_message))
     app.run_polling(drop_pending_updates=True)
 
 
