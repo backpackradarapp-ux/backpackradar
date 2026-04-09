@@ -40,12 +40,14 @@ ADMIN_IDS = [8416016131]
 WEBHOOK_PORT = 8080
 
 BOT_INSTANCE = None
+FREE_DAILY_LIMIT = 3  # Nombre d'offres avec lien dans le canal FREE par jour par ville
+free_post_counts = {}  # {"adelaide": 5, "perth": 2, ...} reset chaque jour
 
 # ============ TRANSLATIONS ============
 T = {
     "welcome": {
-        "fr": "🎒 <b>Bienvenue sur BackpackRadar !</b>\n\nJe trouve les meilleurs jobs WHV/PVT en Australie et je les poste dans des canaux Telegram par ville.\n\n🆓 <b>Plan Gratuit</b> : Canal FREE de ta ville (offres sans lien)\n⭐ <b>Plan Pro</b> ($9.99/mois) : Canal PRO avec liens directs pour postuler\n\nChoisis ta ville pour commencer :\n\n❓ Une question ? @Backpackradarapp",
-        "en": "🎒 <b>Welcome to BackpackRadar!</b>\n\nI find the best WHV jobs in Australia and post them in Telegram channels by city.\n\n🆓 <b>Free Plan</b>: FREE channel for your city (listings without link)\n⭐ <b>Pro Plan</b> ($9.99/mo): PRO channel with direct apply links\n\nPick your city to get started:\n\n❓ Questions? @Backpackradarapp",
+        "fr": "🎒 <b>Bienvenue sur BackpackRadar !</b>\n\nJe trouve les meilleurs jobs WHV/PVT en Australie et je les poste dans des canaux Telegram par ville.\n\n🆓 <b>Plan Gratuit</b> :\n• 3 offres avec lien de candidature par jour\n• 1 ville au choix\n\n⭐ <b>Plan Pro</b> ($9.99/mois) :\n• Liens de candidature illimites\n• Toutes les villes d'Australie\n\nChoisis ta ville pour commencer :\n\n❓ Une question ? @Backpackradarapp",
+        "en": "🎒 <b>Welcome to BackpackRadar!</b>\n\nI find the best WHV jobs in Australia and post them in Telegram channels by city.\n\n🆓 <b>Free Plan</b>:\n• 3 job apply links per day\n• 1 city of your choice\n\n⭐ <b>Pro Plan</b> ($9.99/mo):\n• Unlimited apply links\n• All Australian cities\n\nPick your city to get started:\n\n❓ Questions? @Backpackradarapp",
     },
     "welcome_back": {
         "fr": "Content de te revoir ! 👋\n\nTa ville : <b>{city}</b>\nTon plan : <b>{plan}</b>\n\n{channels}\n/city - Changer de ville\n/premium - Passer Pro\n/status - Voir ton compte\n/lang - Changer la langue\n\n❓ Une question ? @Backpackradarapp",
@@ -56,20 +58,20 @@ T = {
         "en": "📍 Pick your city:",
     },
     "city_set": {
-        "fr": "✅ Parfait !\n\nTu recevras les offres WHV pour <b>{city}</b>.\n\n⭐ Pour les liens directs : /premium\n\n❓ Une question ? @Backpackradarapp",
-        "en": "✅ Great!\n\nYou'll receive WHV jobs for <b>{city}</b>.\n\n⭐ For direct links: /premium\n\n❓ Questions? @Backpackradarapp",
+        "fr": "✅ Parfait !\n\nTu recevras les offres WHV pour <b>{city}</b>.\n\n🆓 Plan Gratuit : 3 liens de candidature par jour\n⭐ Plan Pro : liens illimites + toutes les villes\n\n👉 /premium pour passer Pro\n\n❓ Une question ? @Backpackradarapp",
+        "en": "✅ Great!\n\nYou'll receive WHV jobs for <b>{city}</b>.\n\n🆓 Free Plan: 3 apply links per day\n⭐ Pro Plan: unlimited links + all cities\n\n👉 /premium to go Pro\n\n❓ Questions? @Backpackradarapp",
     },
     "join_channel": {
         "fr": "👉 Rejoins le canal {city}",
         "en": "👉 Join the {city} channel",
     },
     "already_pro": {
-        "fr": "Tu es deja Pro ! ✨\n\n📋 Gerer ton abonnement (resilier, changer de carte) :\n{portal}\n\n❓ Une question ? @Backpackradarapp",
-        "en": "You're already Pro! ✨\n\n📋 Manage your subscription (cancel, change card):\n{portal}\n\n❓ Questions? @Backpackradarapp",
+        "fr": "Tu es deja Pro ! ✨\n\n✅ Liens de candidature illimites\n✅ Acces a toutes les villes\n\n📋 Gerer ton abonnement (resilier, changer de carte) :\n{portal}\n\n❓ Une question ? @Backpackradarapp",
+        "en": "You're already Pro! ✨\n\n✅ Unlimited apply links\n✅ Access to all cities\n\n📋 Manage your subscription (cancel, change card):\n{portal}\n\n❓ Questions? @Backpackradarapp",
     },
     "premium_pitch": {
-        "fr": "⭐ <b>BackpackRadar Pro</b>\n\n✅ Toutes les offres WHV en temps reel\n✅ Lien direct pour postuler en 1 clic\n✅ Toutes les villes d'Australie\n\n💰 <b>$9.99 AUD/mois</b>\n\n❓ Une question ? @Backpackradarapp",
-        "en": "⭐ <b>BackpackRadar Pro</b>\n\n✅ All WHV jobs in real time\n✅ Direct link to apply in 1 click\n✅ All Australian cities\n\n💰 <b>$9.99 AUD/month</b>\n\n❓ Questions? @Backpackradarapp",
+        "fr": "⭐ <b>BackpackRadar Pro</b>\n\n🆓 Gratuit : 3 liens par jour, 1 ville\n⭐ Pro : liens illimites, toutes les villes\n\n✅ Liens directs pour postuler en 1 clic\n✅ Offres en temps reel 24h/24\n✅ Adelaide, Perth, Brisbane, Sydney, Melbourne\n\n💰 <b>$9.99 AUD/mois</b> - resiliable a tout moment\n\n❓ Une question ? @Backpackradarapp",
+        "en": "⭐ <b>BackpackRadar Pro</b>\n\n🆓 Free: 3 links per day, 1 city\n⭐ Pro: unlimited links, all cities\n\n✅ Direct apply links in 1 click\n✅ Real-time jobs 24/7\n✅ Adelaide, Perth, Brisbane, Sydney, Melbourne\n\n💰 <b>$9.99 AUD/month</b> - cancel anytime\n\n❓ Questions? @Backpackradarapp",
     },
     "subscribe_btn": {
         "fr": "💳 S'abonner",
@@ -78,6 +80,14 @@ T = {
     "status_title": {
         "fr": "📋 <b>Ton compte</b>\n\n📍 Ville : <b>{city}</b>\n💎 Plan : <b>{plan}</b>\n",
         "en": "📋 <b>Your account</b>\n\n📍 City: <b>{city}</b>\n💎 Plan: <b>{plan}</b>\n",
+    },
+    "status_free_info": {
+        "fr": "🆓 3 liens de candidature par jour\n⭐ Passe Pro pour des liens illimites + toutes les villes\n",
+        "en": "🆓 3 apply links per day\n⭐ Go Pro for unlimited links + all cities\n",
+    },
+    "status_pro_info": {
+        "fr": "✅ Liens de candidature illimites\n✅ Acces a toutes les villes\n",
+        "en": "✅ Unlimited apply links\n✅ Access to all cities\n",
     },
     "free_channel": {
         "fr": "📢 Canal FREE : {link}\n",
@@ -92,20 +102,20 @@ T = {
         "en": "\n📋 Manage / cancel your sub:\n{portal}\n",
     },
     "go_pro_btn": {
-        "fr": "⭐ Passer Pro",
-        "en": "⭐ Go Pro",
+        "fr": "⭐ Passer Pro - Liens illimites",
+        "en": "⭐ Go Pro - Unlimited links",
     },
     "help": {
-        "fr": "🎒 <b>BackpackRadar</b>\n\n/start - Accueil\n/city - Changer de ville\n/premium - Passer Pro\n/status - Ton compte\n/lang - Changer la langue\n\n❓ Une question ? @Backpackradarapp",
-        "en": "🎒 <b>BackpackRadar</b>\n\n/start - Home\n/city - Change city\n/premium - Go Pro\n/status - Your account\n/lang - Change language\n\n❓ Questions? @Backpackradarapp",
+        "fr": "🎒 <b>BackpackRadar</b>\n\n/start - Accueil\n/city - Changer de ville\n/premium - Passer Pro\n/status - Ton compte\n/lang - Changer la langue\n\n🆓 Gratuit : 3 liens par jour, 1 ville\n⭐ Pro : liens illimites, toutes les villes\n\n❓ Une question ? @Backpackradarapp",
+        "en": "🎒 <b>BackpackRadar</b>\n\n/start - Home\n/city - Change city\n/premium - Go Pro\n/status - Your account\n/lang - Change language\n\n🆓 Free: 3 links per day, 1 city\n⭐ Pro: unlimited links, all cities\n\n❓ Questions? @Backpackradarapp",
     },
     "activated": {
-        "fr": "🎉 <b>Ton compte est maintenant Pro !</b>\n\n👉 Rejoins tes canaux Pro :\n\n{links}\n📋 Gerer ton abonnement : {portal}\nMerci ! 🙏\n\n❓ Une question ? @Backpackradarapp",
-        "en": "🎉 <b>Your account is now Pro!</b>\n\n👉 Join your Pro channels:\n\n{links}\n📋 Manage your subscription: {portal}\nThank you! 🙏\n\n❓ Questions? @Backpackradarapp",
+        "fr": "🎉 <b>Ton compte est maintenant Pro !</b>\n\n✅ Liens de candidature illimites\n✅ Toutes les villes d'Australie\n\n👉 Rejoins tes canaux Pro :\n\n{links}\n📋 Gerer ton abonnement : {portal}\nMerci ! 🙏\n\n❓ Une question ? @Backpackradarapp",
+        "en": "🎉 <b>Your account is now Pro!</b>\n\n✅ Unlimited apply links\n✅ All Australian cities\n\n👉 Join your Pro channels:\n\n{links}\n📋 Manage your subscription: {portal}\nThank you! 🙏\n\n❓ Questions? @Backpackradarapp",
     },
     "deactivated": {
-        "fr": "😔 <b>Ton abonnement Pro est termine.</b>\n\nTu as ete retire des canaux Pro.\n\nTu peux continuer a utiliser le canal gratuit de ta ville.\n👇 Choisis ta ville gratuite ou reabonne-toi :\n\n❓ Une question ? @Backpackradarapp",
-        "en": "😔 <b>Your Pro subscription has ended.</b>\n\nYou've been removed from Pro channels.\n\nYou can still use the free channel for your city.\n👇 Pick your free city or resubscribe:\n\n❓ Questions? @Backpackradarapp",
+        "fr": "😔 <b>Ton abonnement Pro est termine.</b>\n\nTu as ete retire des canaux Pro.\nTu repasses en plan gratuit (3 liens par jour, 1 ville).\n\n👇 Choisis ta ville gratuite ou reabonne-toi :\n\n❓ Une question ? @Backpackradarapp",
+        "en": "😔 <b>Your Pro subscription has ended.</b>\n\nYou've been removed from Pro channels.\nYou're back on the free plan (3 links per day, 1 city).\n\n👇 Pick your free city or resubscribe:\n\n❓ Questions? @Backpackradarapp",
     },
     "resubscribe_btn": {
         "fr": "⭐ Se reabonner Pro",
@@ -552,7 +562,7 @@ def format_job_pro(job, city_name, requirements):
     return "\n".join(lines)
 
 
-def format_job_free(job, city_name, requirements):
+def format_job_free(job, city_name, requirements, with_link=False):
     ct = job.get("contractType", "")
     emoji = {"Full-time": "🟢", "Part-time": "🔵", "Casual": "🟡", "Contract": "🟠"}.get(ct, "💼")
     lines = []
@@ -566,8 +576,14 @@ def format_job_free(job, city_name, requirements):
     if requirements:
         lines.append("⚠️ " + html_escape(", ".join(requirements)))
     lines.append("")
-    lines.append("🔒 Pro members only / Membres Pro uniquement")
-    lines.append("👉 @backpackradar_bot /premium")
+    if with_link:
+        lines.append('🔗 <a href="' + job["link"] + '">Apply / Postuler</a>')
+        lines.append("")
+        lines.append("⭐ Unlimited links with Pro / Liens illimites avec Pro")
+        lines.append("👉 @backpackradar_bot /premium")
+    else:
+        lines.append("🔒 Pro members only / Membres Pro uniquement")
+        lines.append("👉 @backpackradar_bot /premium")
     return "\n".join(lines)
 
 
@@ -724,10 +740,12 @@ async def cmd_status(update, context):
     if city_key in CITIES:
         msg += t("free_channel", lang).format(link=free_link(city_key))
     if user_data.get("plan") == "premium":
+        msg += t("status_pro_info", lang)
         msg += t("pro_channels", lang)
         msg += t("manage_sub", lang).format(portal=STRIPE_PORTAL_URL)
         await update.message.reply_text(msg, parse_mode="HTML")
     else:
+        msg += t("status_free_info", lang)
         payment_url = STRIPE_PAYMENT_LINK + "?client_reference_id=" + str(update.effective_user.id)
         keyboard = [[InlineKeyboardButton(t("go_pro_btn", lang), url=payment_url)]]
         await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -859,6 +877,7 @@ async def cmd_stats(update, context):
 # ============ POST TO CHANNELS ============
 
 async def post_job_to_channels(bot, job, city_key, requirements):
+    global free_post_counts
     city = CITIES[city_key]
     city_name = city["name"]
     try:
@@ -868,9 +887,13 @@ async def post_job_to_channels(bot, job, city_key, requirements):
     except Exception as e:
         log.warning("PRO post failed " + city_key + ": " + str(e))
     try:
-        free_msg = format_job_free(job, city_name, requirements)
+        # Check if free channel still has link quota for today
+        count = free_post_counts.get(city_key, 0)
+        with_link = count < FREE_DAILY_LIMIT
+        free_msg = format_job_free(job, city_name, requirements, with_link=with_link)
         await bot.send_message(chat_id=city["free"], text=free_msg, parse_mode="HTML")
-        log.info("Posted to FREE " + city_key)
+        free_post_counts[city_key] = count + 1
+        log.info("Posted to FREE " + city_key + " (with_link=" + str(with_link) + ", count=" + str(count + 1) + ")")
     except Exception as e:
         log.warning("FREE post failed " + city_key + ": " + str(e))
     await asyncio.sleep(0.5)
@@ -890,6 +913,8 @@ async def scraping_loop(app):
         now = datetime.utcnow()
         if now.date() > last_reset:
             reset_daily_counts()
+            free_post_counts.clear()
+            log.info("Daily reset: free post counts cleared")
             last_reset = now.date()
         log.info("=== CYCLE " + str(cycle) + " - " + now.strftime("%H:%M:%S UTC") + " ===")
         total_new = 0
