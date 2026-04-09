@@ -562,7 +562,7 @@ def format_job_pro(job, city_name, requirements):
     return "\n".join(lines)
 
 
-def format_job_free(job, city_name, requirements, with_link=False):
+def format_job_free(job, city_name, requirements, remaining=0):
     ct = job.get("contractType", "")
     emoji = {"Full-time": "🟢", "Part-time": "🔵", "Casual": "🟡", "Contract": "🟠"}.get(ct, "💼")
     lines = []
@@ -576,14 +576,13 @@ def format_job_free(job, city_name, requirements, with_link=False):
     if requirements:
         lines.append("⚠️ " + html_escape(", ".join(requirements)))
     lines.append("")
-    if with_link:
-        lines.append('🔗 <a href="' + job["link"] + '">Apply / Postuler</a>')
-        lines.append("")
-        lines.append("⭐ Unlimited links with Pro / Liens illimites avec Pro")
-        lines.append("👉 @backpackradar_bot /premium")
+    lines.append('🔗 <a href="' + job["link"] + '">Apply / Postuler</a>')
+    lines.append("")
+    if remaining > 0:
+        lines.append("🆓 " + str(remaining) + " offre(s) restante(s) aujourd'hui / " + str(remaining) + " free link(s) left today")
     else:
-        lines.append("🔒 Pro members only / Membres Pro uniquement")
-        lines.append("👉 @backpackradar_bot /premium")
+        lines.append("🆓 Derniere offre gratuite du jour ! / Last free link today!")
+    lines.append("⭐ Illimite avec Pro / Unlimited with Pro → /premium")
     return "\n".join(lines)
 
 
@@ -886,16 +885,19 @@ async def post_job_to_channels(bot, job, city_key, requirements):
         log.info("Posted to PRO " + city_key)
     except Exception as e:
         log.warning("PRO post failed " + city_key + ": " + str(e))
-    try:
-        # Check if free channel still has link quota for today
-        count = free_post_counts.get(city_key, 0)
-        with_link = count < FREE_DAILY_LIMIT
-        free_msg = format_job_free(job, city_name, requirements, with_link=with_link)
-        await bot.send_message(chat_id=city["free"], text=free_msg, parse_mode="HTML")
-        free_post_counts[city_key] = count + 1
-        log.info("Posted to FREE " + city_key + " (with_link=" + str(with_link) + ", count=" + str(count + 1) + ")")
-    except Exception as e:
-        log.warning("FREE post failed " + city_key + ": " + str(e))
+    # FREE channel: max 3 per day, all with links, then stop
+    count = free_post_counts.get(city_key, 0)
+    if count < FREE_DAILY_LIMIT:
+        try:
+            remaining = FREE_DAILY_LIMIT - count - 1
+            free_msg = format_job_free(job, city_name, requirements, remaining=remaining)
+            await bot.send_message(chat_id=city["free"], text=free_msg, parse_mode="HTML")
+            free_post_counts[city_key] = count + 1
+            log.info("Posted to FREE " + city_key + " (" + str(count + 1) + "/" + str(FREE_DAILY_LIMIT) + ")")
+        except Exception as e:
+            log.warning("FREE post failed " + city_key + ": " + str(e))
+    else:
+        log.info("FREE limit reached for " + city_key + " (" + str(count) + "/" + str(FREE_DAILY_LIMIT) + "), skipping")
     await asyncio.sleep(0.5)
 
 
